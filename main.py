@@ -3,6 +3,7 @@ from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Footer, Input, Markdown, OptionList, Label
 from textual.screen import Screen
+from textual.worker import Worker, WorkerState
 import llm
 from dotenv import load_dotenv
 import os
@@ -31,28 +32,34 @@ load_dotenv(dotenv_path=os.path.abspath(os.path.join(os.path.dirname(__file__), 
 SYSTEM = None
 MODEL = "gpt-4o-mini"
 
-def file_picker():
-    root = tk.Tk()
-    root.withdraw()
-    root.attributes("-topmost", True)
-    fpath = filedialog.askopenfilenames(filetypes=[('All files', '*.*')])
-    root.destroy()
-    return fpath
-
 class Prompt(Markdown):
     """Markdown for the user prompt."""
 
-
 class Response(Markdown):
     """Markdown for the reply from the LLM."""
-
     BORDER_TITLE = None
 
-class SetSystem(Screen):
+class InputScreen(Screen):
     BINDINGS = [("escape", "app.pop_screen", "back")]
 
+    CSS = """
+    InputScreen {
+        align: center middle;
+    }
+
+    Input {
+        width: 80%;
+    }
+    """
+
+    def __init__(self, text: str, placeholder: str = ""):
+        self.text = text
+        self.placeholder = placeholder
+        super().__init__()
+
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="Enter system prompt", type="text")
+        yield Label(self.text)
+        yield Input(placeholder=self.placeholder, type="text")
 
     @on(Input.Submitted)
     async def on_input(self, event: Input.Submitted) -> None:
@@ -64,29 +71,35 @@ class SetSystem(Screen):
 
 class SetModel(Screen):
     BINDINGS = [("escape", "app.pop_screen", "back")]
+    AUTO_FOCUS = "OptionList"
+
+    CSS = """
+    SetModel {
+        align: center middle;
+    }
+
+    OptionList {
+        width: 70%;
+        height: 80%;
+    }
+    """
+
+    def __init__(self, curr_model: str):
+        self.curr_model = curr_model
+        super().__init__()
 
     def compose(self) -> ComposeResult:
-        yield OptionList(
-            Option('GPT-5.4', id='gpt-5.4'),
-            Option('GPT-5.4 mini', id='gpt-5.4-mini'),
-            Option('GPT-4o', id='gpt-4o'),
-            Option('GPT-4.1', id='gpt-4.1'),
-            Option('Claude Opus 4.6', id='claude-opus-4.6'),
-            Option('Claude Sonnet 4.6', id='claude-sonnet-4.6'),
-            Option('Claude Haiku 4.5', id='claude-haiku-4.5'),
-            Option('Deepseek Chat', id='deepseek-chat'),
-            Option('Deepseek Coder', id='deepseek-coder'),
-            Option('Deepseek Reasoner', id='deepseek-reasoner'),
-            Option('Grok 4.1 Reasoning', id='grok-4-1-fast-reasoning-latest'),
-        ) 
+        models = [model.model_id for model in llm.get_models()]
+        option_list = OptionList(*models)
+        option_list.highlighted = models.index(self.curr_model)
+        yield option_list
 
     @on(OptionList.OptionSelected)
     async def on_input(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(event.option_id)
+        self.dismiss(event.option.prompt)
 
 class LlmApp(App):
     AUTO_FOCUS = "Input"
-    # COMMAND_PALETTE_BINDING = "escape"
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("ctrl+c", "quit"),
@@ -148,7 +161,7 @@ class LlmApp(App):
         await chat_view.mount(response)
         self.send_prompt(event.value, self.attachments, response)
         
-    @work(thread=True)
+    @work(thread=True, exit_on_error=False)
     def send_prompt(self, prompt: str, attachments: list[llm.Attachment], response: Response) -> None:
         """Get the response in a thread."""
         llm_response = self.conversation.prompt(prompt, system=self.system, attachments=attachments)
@@ -168,6 +181,12 @@ class LlmApp(App):
         self.query_one(Label).content = f"Attachments: {len(self.attachments)}"
         self.refresh_bindings()
 
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        if event.worker.state == WorkerState.ERROR:
+            chat_view = self.query_one("#chat-view")
+            response = chat_view.children[-1]
+            response.update(f"{event.worker.error}")
+
     def action_set_system(self) -> None:
         def set_system(prompt: str | None) -> None:
             """Called when Screen is dismissed."""
@@ -175,7 +194,7 @@ class LlmApp(App):
             chat_view = self.query_one("#chat-view")
             chat_view.mount(Prompt(f"system prompt set to: {self.system}"))
 
-        self.push_screen(SetSystem(), set_system)
+        self.push_screen(InputScreen(f"Current system prompt: {self.system}"), set_system)
 
     def action_set_model(self) -> None:
         def set_model(model: str) -> None:
@@ -185,7 +204,7 @@ class LlmApp(App):
             chat_view = self.query_one("#chat-view")
             chat_view.mount(Prompt(f"model set to: {model}"))
 
-        self.push_screen(SetModel(), set_model)
+        self.push_screen(SetModel(self.model_name), set_model)
 
     def action_clear_context(self) -> None:
         self.conversation = self.model.conversation()
@@ -193,9 +212,9 @@ class LlmApp(App):
         chat_view.mount(Prompt("context cleared"))
 
     def action_attach_file(self) -> None:
-        files = file_picker()
+        filenames = filedialog.askopenfilenames(filetypes=[('All files', '*.*')])
         chat_view = self.query_one("#chat-view")
-        for f in files:
+        for f in filenames:
             self.attachments.append(llm.Attachment(path=f))
             chat_view.mount(Prompt(f"attached file: {f}"))
 

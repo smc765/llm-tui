@@ -8,7 +8,9 @@
 
 ### 2. Set API Keys
 
-Create a `.env` file with any of the following
+    llm keys set openai
+
+Or create a `.env` file with any of the following
 
     OPENAI_API_KEY=your_key_here
     ANTHROPIC_API_KEY=your_key_here
