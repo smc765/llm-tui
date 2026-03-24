@@ -12,13 +12,18 @@ import tkinter as tk
 from tkinter import filedialog
 from screenshot import get_screenshot
 import tempfile
-
+import argparse
 import logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    handlers=[logging.FileHandler('debug.log'),]
-    )
+
 logger = logging.getLogger(__name__)
+parser = argparse.ArgumentParser()
+parser.add_argument("-d", "--debug", action="store_true")
+args = parser.parse_args()
+if args.debug:
+    logging.basicConfig(
+        level=logging.DEBUG,
+        handlers=[logging.FileHandler('debug.log'),]
+        )
 
 load_dotenv(dotenv_path=os.path.abspath(os.path.join(os.path.dirname(__file__), '.env')))
 
