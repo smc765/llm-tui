@@ -1,6 +1,9 @@
 import tkinter as tk
 from PIL import ImageGrab
-import ctypes
+import platform
+
+if platform.system() == "Windows":
+    import ctypes
 
 # TODO fix laptop trackpad
 class Screenshot:
@@ -63,11 +66,21 @@ class Screenshot:
         self.screenshot = ImageGrab.grab(bbox=bbox)
         self.root.destroy()
 
+def minimize() -> None:
+    '''minimize console window'''
+    if platform.system() == "Windows":
+        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 6)
+
+def restore() -> None:
+    '''restore console window'''
+    if platform.system() == "Windows":
+        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 9)
+
 def get_screenshot(filename: str) -> None:
-    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 6) # minimize window
+    minimize()
     root = tk.Tk()
     app = Screenshot(root)
     root.mainloop()
-    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 9) # restore window
+    restore()
     assert app.screenshot is not None
     app.screenshot.save(filename)

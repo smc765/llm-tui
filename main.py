@@ -12,7 +12,6 @@ import tkinter as tk
 from tkinter import filedialog
 from screenshot import get_screenshot
 import tempfile
-import ctypes
 
 import logging
 logging.basicConfig(
@@ -127,7 +126,7 @@ class LlmApp(App):
         self.query_one("#chat-view").anchor()
         self.system = SYSTEM
         self.attachments = []
-        self.prev_attachments = None
+        self.prev_attachments = []
         self.prev_prompt = None
  
     @on(Input.Submitted)
@@ -147,15 +146,19 @@ class LlmApp(App):
     @work(thread=True)
     def send_prompt(self, prompt: str, attachments: list[llm.Attachment], response: Response) -> None:
         """Get the response in a thread."""
-        response_content = ""
         llm_response = self.conversation.prompt(prompt, system=self.system, attachments=attachments)
-        for chunk in llm_response:
+        response.border_subtitle = f"Attachments: {len(attachments)}"
+        response_content = ""
+        for n, chunk in enumerate(llm_response, 1):
             response_content += chunk
-            self.call_from_thread(response.update, response_content)
-            
-        response.border_subtitle = f"Input tokens: {llm_response.input_tokens} Output tokens: {llm_response.output_tokens} Attachments: {len(attachments)}"
-        self.prev_attachments = attachments
+            step = (n + 4) // 5
+            if n % step == 0:
+                self.call_from_thread(response.update, response_content)
+        
+        self.call_from_thread(response.update, response_content)
+        response.border_subtitle = f"Attachments: {len(attachments)} Input tokens: {llm_response.input_tokens} Output tokens: {llm_response.output_tokens}"
         self.prev_prompt = prompt
+        self.prev_attachments = attachments.copy()
         attachments.clear()
         self.query_one(Label).content = f"Attachments: {len(self.attachments)}"
         self.refresh_bindings()
@@ -212,19 +215,19 @@ class LlmApp(App):
         chat_view.mount(Prompt(f"attachments cleared"))
         self.refresh_bindings()
 
-    def action_regenerate(self) -> None:
+    async def action_regenerate(self) -> None:
         '''resend previous prompt'''
-        if self.prev_prompt is not None:
-            chat_view = self.query_one("#chat-view")
-            response = Response()
-            response.border_title = self.model_name
-            chat_view.mount(response)
-            self.send_prompt(self.prev_prompt, self.prev_attachments, response)
+        assert self.prev_prompt is not None
+        chat_view = self.query_one("#chat-view")
+        response = Response()
+        response.border_title = self.model_name
+        await chat_view.mount(response)
+        self.send_prompt(self.prev_prompt, self.prev_attachments, response)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:  
         """Check if an action may run."""
         if action == "regenerate" and self.prev_prompt is None:
-            return self.attachments != []
+            return False
         if action == "clear_attachments" and len(self.attachments) == 0:
             return False
         return True
