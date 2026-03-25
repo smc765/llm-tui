@@ -4,17 +4,18 @@ from textual.containers import VerticalScroll
 from textual.widgets import Footer, Input, Markdown, OptionList, Label
 from textual.screen import Screen
 from textual.worker import Worker, WorkerState
+from textual.binding import Binding
+from textual.widgets.option_list import Option
 import llm
 from dotenv import load_dotenv
 import os
-from textual.binding import Binding
-from textual.widgets.option_list import Option
-import tkinter as tk
-from tkinter import filedialog
-from screenshot import get_screenshot
 import tempfile
 import argparse
 import logging
+import time
+import tkinter as tk
+from tkinter import filedialog
+from screenshot import get_screenshot
 
 logger = logging.getLogger(__name__)
 parser = argparse.ArgumentParser()
@@ -23,10 +24,10 @@ args = parser.parse_args()
 if args.debug:
     logging.basicConfig(
         level=logging.DEBUG,
-        handlers=[logging.FileHandler('debug.log'),]
+        handlers=[logging.FileHandler("debug.log"),]
         )
 
-load_dotenv(dotenv_path=os.path.abspath(os.path.join(os.path.dirname(__file__), '.env')))
+load_dotenv(dotenv_path=os.path.abspath(os.path.join(os.path.dirname(__file__), ".env")))
 
 # defaults
 SYSTEM = None
@@ -163,17 +164,22 @@ class LlmApp(App):
         
     @work(thread=True, exit_on_error=False)
     def send_prompt(self, prompt: str, attachments: list[llm.Attachment], response: Response) -> None:
-        """Get the response in a thread."""
-        llm_response = self.conversation.prompt(prompt, system=self.system, attachments=attachments)
         response.border_subtitle = f"Attachments: {len(attachments)}"
-        response_content = ""
-        for n, chunk in enumerate(llm_response, 1):
-            response_content += chunk
-            step = (n + 4) // 5
-            if n % step == 0:
-                self.call_from_thread(response.update, response_content)
-        
-        self.call_from_thread(response.update, response_content)
+
+        llm_response = self.conversation.prompt(prompt, system=self.system, attachments=attachments)
+        buf = []
+        last_update = 0
+        for chunk in llm_response:
+            buf.append(chunk)
+            t = time.time()
+            if t - last_update > 0.1:
+                self.call_from_thread(response.append, "".join(buf))
+                buf.clear()
+                last_update = t
+
+        if buf:
+            self.call_from_thread(response.append, "".join(buf))
+
         response.border_subtitle = f"Attachments: {len(attachments)} Input tokens: {llm_response.input_tokens} Output tokens: {llm_response.output_tokens}"
         self.prev_prompt = prompt
         self.prev_attachments = attachments.copy()
@@ -185,7 +191,7 @@ class LlmApp(App):
         if event.worker.state == WorkerState.ERROR:
             chat_view = self.query_one("#chat-view")
             response = chat_view.children[-1]
-            response.update(f"{event.worker.error}")
+            response.update(str(event.worker.error))
 
     def action_set_system(self) -> None:
         def set_system(prompt: str | None) -> None:
@@ -212,7 +218,7 @@ class LlmApp(App):
         chat_view.mount(Prompt("context cleared"))
 
     def action_attach_file(self) -> None:
-        filenames = filedialog.askopenfilenames(filetypes=[('All files', '*.*')])
+        filenames = filedialog.askopenfilenames(filetypes=[("All files", "*.*")])
         chat_view = self.query_one("#chat-view")
         for f in filenames:
             self.attachments.append(llm.Attachment(path=f))
@@ -221,7 +227,7 @@ class LlmApp(App):
         self.query_one(Label).content = f"Attachments: {len(self.attachments)}"
 
     def action_screenshot(self) -> None:
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png').name
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png").name
         try:
             get_screenshot(temp_file)
         except AssertionError:
@@ -240,7 +246,7 @@ class LlmApp(App):
         self.refresh_bindings()
 
     async def action_regenerate(self) -> None:
-        '''resend previous prompt'''
+        """resend previous prompt"""
         assert self.prev_prompt is not None
         chat_view = self.query_one("#chat-view")
         response = Response()

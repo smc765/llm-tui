@@ -13,7 +13,7 @@ class Screenshot:
         self.root.attributes("-fullscreen", True)
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.3)
-        self.root.configure(bg='black')
+        self.root.configure(bg="black")
 
         self.start_x = None
         self.start_y = None
@@ -33,7 +33,7 @@ class Screenshot:
 
         self.label = tk.Label(
             self.canvas,
-            text=' Select reigon to screenshot or press any key to exit... ',
+            text=" Select reigon to screenshot or press any key to exit... ",
             font=("Arial", 16), 
         )
         self.label.pack(pady=10)
@@ -44,7 +44,7 @@ class Screenshot:
 
         self.rect = self.canvas.create_rectangle(
             self.start_x, self.start_y, self.start_x, self.start_y, 
-            outline='red',
+            outline="red",
             width=2
         )
 
@@ -67,12 +67,12 @@ class Screenshot:
         self.root.destroy()
 
 def minimize() -> None:
-    '''minimize console window'''
+    """minimize console window"""
     if platform.system() == "Windows":
         ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 6)
 
 def restore() -> None:
-    '''restore console window'''
+    """restore console window"""
     if platform.system() == "Windows":
         ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 9)
 
