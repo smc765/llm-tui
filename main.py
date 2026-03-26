@@ -1,14 +1,13 @@
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
-from textual.widgets import Footer, Input, Markdown, OptionList, Label
-from textual.screen import Screen
+from textual.widgets import Footer, Input, Markdown, OptionList, Label, TextArea
+from textual.screen import ModalScreen
 from textual.worker import Worker, WorkerState
 from textual.binding import Binding
 from textual.widgets.option_list import Option
 import llm
 from dotenv import load_dotenv
-import os
 import tempfile
 import argparse
 import logging
@@ -16,6 +15,10 @@ import time
 import tkinter as tk
 from tkinter import filedialog
 from screenshot import get_screenshot
+
+# defaults
+SYSTEM = None
+MODEL = "gpt-5.4"
 
 logger = logging.getLogger(__name__)
 parser = argparse.ArgumentParser()
@@ -27,11 +30,7 @@ if args.debug:
         handlers=[logging.FileHandler("debug.log"),]
         )
 
-load_dotenv(dotenv_path=os.path.abspath(os.path.join(os.path.dirname(__file__), ".env")))
-
-# defaults
-SYSTEM = None
-MODEL = "gpt-4o-mini"
+load_dotenv()
 
 class Prompt(Markdown):
     """Markdown for the user prompt."""
@@ -40,38 +39,57 @@ class Response(Markdown):
     """Markdown for the reply from the LLM."""
     BORDER_TITLE = None
 
-class InputScreen(Screen):
-    BINDINGS = [("escape", "app.pop_screen", "back")]
+class InputScreen(ModalScreen):
+    BINDINGS = [
+        ("ctrl+c", "app.quit"),
+        ("escape", "app.pop_screen", "Back"),
+        ("ctrl+s", "save", "Save"),
+        ("ctrl+l", "load_file", "Load File"),
+        ("ctrl+r", "clear", "Clear"),
+        ]
+    AUTO_FOCUS = "TextArea"
 
-    CSS = """
-    InputScreen {
-        align: center middle;
-    }
-
-    Input {
-        width: 80%;
-    }
-    """
-
-    def __init__(self, text: str, placeholder: str = ""):
-        self.text = text
-        self.placeholder = placeholder
+    def __init__(self, text: str | None):
+        self.text = text if text is not None else ""
         super().__init__()
 
     def compose(self) -> ComposeResult:
-        yield Label(self.text)
-        yield Input(placeholder=self.placeholder, type="text")
+        yield TextArea(self.text)
+        yield Footer()
 
-    @on(Input.Submitted)
-    async def on_input(self, event: Input.Submitted) -> None:
-        if event.value == "":
-            self.dismiss(None)
-        else:
-            self.dismiss(event.value)
-        event.stop()
+    def action_save(self) -> None:
+        text = self.query_one(TextArea).text
+        self.dismiss(text if text else None)
 
-class SetModel(Screen):
-    BINDINGS = [("escape", "app.pop_screen", "back")]
+    def action_clear(self) -> None:
+        self.query_one(TextArea).clear()
+
+    # @on(TextArea.Changed)
+    # def on_change(self, event: TextArea.Changed) -> None:
+    #     self.refresh_bindings()
+
+    # def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:  
+    #     if action == "clear" and self.query_one(TextArea).text == "":
+    #         return False
+    #     return True
+
+    def action_load_file(self) -> None:
+        text_area = self.query_one(TextArea)
+        filename = filedialog.askopenfilename()
+        if filename != "":
+            with open(filename) as f:
+                text_area.clear()
+                try:
+                    text = f.read()
+                except UnicodeDecodeError:
+                    return
+                text_area.insert(text)
+
+class SetModel(ModalScreen):
+    BINDINGS = [
+        ("ctrl+c", "app.quit"),
+        ("escape", "app.pop_screen", "back"),
+        ]
     AUTO_FOCUS = "OptionList"
 
     CSS = """
@@ -96,7 +114,7 @@ class SetModel(Screen):
         yield option_list
 
     @on(OptionList.OptionSelected)
-    async def on_input(self, event: OptionList.OptionSelected) -> None:
+    def on_input(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option.prompt)
 
 class LlmApp(App):
@@ -104,11 +122,11 @@ class LlmApp(App):
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("ctrl+c", "quit"),
-        Binding("f1", "set_system", "Set System Prompt"),
+        Binding("f1", "set_system", "Edit System Prompt"),
         Binding("f2", "set_model", "Set Model"),
         Binding("f3", "clear_context", "Clear Context"),
         Binding("f4", "attach_file", "Attach File(s)"),
-        Binding("f5", "screenshot", "Attach Screenshot"),
+        Binding("f5", "screenshot", "Screenshot"),
         Binding("f6", "clear_attachments", "Clear Attachments"),
         Binding("f7", "regenerate", "Regenerate"),
     ]
@@ -200,7 +218,7 @@ class LlmApp(App):
             chat_view = self.query_one("#chat-view")
             chat_view.mount(Prompt(f"system prompt set to: {self.system}"))
 
-        self.push_screen(InputScreen(f"Current system prompt: {self.system}"), set_system)
+        self.push_screen(InputScreen(self.system), set_system)
 
     def action_set_model(self) -> None:
         def set_model(model: str) -> None:
@@ -218,7 +236,7 @@ class LlmApp(App):
         chat_view.mount(Prompt("context cleared"))
 
     def action_attach_file(self) -> None:
-        filenames = filedialog.askopenfilenames(filetypes=[("All files", "*.*")])
+        filenames = filedialog.askopenfilenames()
         chat_view = self.query_one("#chat-view")
         for f in filenames:
             self.attachments.append(llm.Attachment(path=f))
