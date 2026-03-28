@@ -16,9 +16,9 @@ import tkinter as tk
 from tkinter import filedialog
 from screenshot import get_screenshot
 
-# defaults
 SYSTEM = None
 MODEL = "gpt-5.4"
+RESPONSE_UPDATE_INTERVAL = 0.1
 
 logger = logging.getLogger(__name__)
 parser = argparse.ArgumentParser()
@@ -39,7 +39,7 @@ class Response(Markdown):
     """Markdown for the reply from the LLM."""
     BORDER_TITLE = None
 
-class InputScreen(ModalScreen):
+class EditScreen(ModalScreen):
     BINDINGS = [
         ("ctrl+c", "app.quit"),
         ("escape", "app.pop_screen", "Back"),
@@ -59,7 +59,9 @@ class InputScreen(ModalScreen):
 
     def action_save(self) -> None:
         text = self.query_one(TextArea).text
-        self.dismiss(text if text else None)
+        if text.isspace() or text == "":
+            text = None
+        self.dismiss(text)
 
     def action_clear(self) -> None:
         self.query_one(TextArea).clear()
@@ -74,16 +76,20 @@ class InputScreen(ModalScreen):
     #     return True
 
     def action_load_file(self) -> None:
-        text_area = self.query_one(TextArea)
         filename = filedialog.askopenfilename()
-        if filename != "":
-            with open(filename) as f:
-                text_area.clear()
-                try:
-                    text = f.read()
-                except UnicodeDecodeError:
-                    return
-                text_area.insert(text)
+        if filename == "":
+            return
+
+        with open(filename) as f:
+            try:
+                text = f.read()
+            except UnicodeDecodeError:
+                self.notify("Could not read file", title="Error")
+                return
+                
+        text_area = self.query_one(TextArea)
+        text_area.clear()
+        text_area.insert(text)
 
 class SetModel(ModalScreen):
     BINDINGS = [
@@ -120,6 +126,7 @@ class SetModel(ModalScreen):
 class LlmApp(App):
     AUTO_FOCUS = "Input"
     ENABLE_COMMAND_PALETTE = False
+    NOTIFICATION_TIMEOUT = 2
     BINDINGS = [
         Binding("ctrl+c", "quit"),
         Binding("f1", "set_system", "Edit System Prompt"),
@@ -190,7 +197,7 @@ class LlmApp(App):
         for chunk in llm_response:
             buf.append(chunk)
             t = time.time()
-            if t - last_update > 0.1:
+            if t - last_update > RESPONSE_UPDATE_INTERVAL:
                 self.call_from_thread(response.append, "".join(buf))
                 buf.clear()
                 last_update = t
@@ -209,7 +216,7 @@ class LlmApp(App):
         if event.worker.state == WorkerState.ERROR:
             chat_view = self.query_one("#chat-view")
             response = chat_view.children[-1]
-            response.update(str(event.worker.error))
+            response.update(f"ERROR: {event.worker.error}")
 
     def action_set_system(self) -> None:
         def set_system(prompt: str | None) -> None:
@@ -218,22 +225,20 @@ class LlmApp(App):
             chat_view = self.query_one("#chat-view")
             chat_view.mount(Prompt(f"system prompt set to: {self.system}"))
 
-        self.push_screen(InputScreen(self.system), set_system)
+        self.push_screen(EditScreen(self.system), set_system)
 
     def action_set_model(self) -> None:
         def set_model(model: str) -> None:
             self.model_name = model
             self.model = llm.get_model(model)
             self.conversation = self.model.conversation()
-            chat_view = self.query_one("#chat-view")
-            chat_view.mount(Prompt(f"model set to: {model}"))
+            self.notify(f"model set to: {model}")
 
         self.push_screen(SetModel(self.model_name), set_model)
 
     def action_clear_context(self) -> None:
         self.conversation = self.model.conversation()
-        chat_view = self.query_one("#chat-view")
-        chat_view.mount(Prompt("context cleared"))
+        self.notify("context cleared")
 
     def action_attach_file(self) -> None:
         filenames = filedialog.askopenfilenames()
@@ -259,12 +264,10 @@ class LlmApp(App):
     def action_clear_attachments(self) -> None:
         self.attachments.clear()
         self.query_one(Label).content = f"Attachments: {len(self.attachments)}"
-        chat_view = self.query_one("#chat-view")
-        chat_view.mount(Prompt(f"attachments cleared"))
+        self.notify("attachments cleared")
         self.refresh_bindings()
 
     async def action_regenerate(self) -> None:
-        """resend previous prompt"""
         assert self.prev_prompt is not None
         chat_view = self.query_one("#chat-view")
         response = Response()
@@ -273,7 +276,6 @@ class LlmApp(App):
         self.send_prompt(self.prev_prompt, self.prev_attachments, response)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:  
-        """Check if an action may run."""
         if action == "regenerate" and self.prev_prompt is None:
             return False
         if action == "clear_attachments" and len(self.attachments) == 0:
