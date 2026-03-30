@@ -5,7 +5,6 @@ import platform
 if platform.system() == "Windows":
     import ctypes
 
-# TODO fix laptop trackpad
 class Screenshot:
     def __init__(self, root):
         self.root = root
