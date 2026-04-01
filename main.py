@@ -17,7 +17,7 @@ from screenshot import get_screenshot
 import subprocess
 import webbrowser
 
-DEFAULT_SYSTEM_PROMPT = "use $$...$$ delimiters for equations and $...$ delimiters for in-line math expressions"
+DEFAULT_SYSTEM_PROMPT = "use $$...$$ delimiters for displayed equations and $...$ delimiters for inline math"
 DEFAULT_MODEL = "gpt-4o-mini"
 RESPONSE_UPDATE_INTERVAL = 0.1
 
@@ -79,7 +79,7 @@ class TuiApp(App):
         ("f3", "attach_file", "Attach File(s)"),
         ("f4", "attach_screenshot", "Screenshot"),
         ("f5", "clear_context", "Clear Context"),
-        ("f6", "edit_prompt", "Multiline Prompt"),
+        ("f6", "multiline_prompt", "Multiline Prompt"),
         ("f7", "clear_attachments", "Clear Attachments"),
     ]
 
@@ -118,11 +118,11 @@ class TuiApp(App):
     def action_edit_system_prompt(self) -> None:
         def set_system_prompt(prompt: str) -> None:
             if prompt.isspace() or prompt == "":
-                self.system = None
+                self.system_prompt = None
             else:
-                self.system = prompt
+                self.system_prompt = prompt
 
-            self.query_one(VerticalScroll).mount(Prompt(f"system prompt set to: {self.system}"))
+            self.query_one(VerticalScroll).mount(Prompt(f"system prompt set to: {self.system_prompt}"))
 
         self.push_screen(TextEditor(self.system_prompt), set_system_prompt)
 
@@ -145,11 +145,8 @@ class TuiApp(App):
 
         self.attach_file(temp.name)
 
-    def action_edit_prompt(self) -> None:
-        async def edit_prompt(prompt: str) -> None:
-            await self.send_prompt(prompt)
-
-        self.push_screen(TextEditor(), edit_prompt)
+    def action_multiline_prompt(self) -> None:
+        self.push_screen(TextEditor(), self.send_prompt)
 
     def action_clear_attachments(self) -> None:
         self.clear_attachments()
