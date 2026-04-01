@@ -12,3 +12,4 @@ build/
 *.spec
 *.exe
 out.html
+*.ps1
