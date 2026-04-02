@@ -190,30 +190,29 @@ class TuiApp(App):
         await self.query_one(VerticalScroll).mount(response)
         self.stream_response(response)
     
-    @work(thread=True, exit_on_error=False)
+    @work(thread=True)
     def stream_response(self, response: Response) -> None:
-        api_key = os.getenv(self.model.key_env_var) # llm should handle this but some plugins don't
-        assert api_key is not None, f"{self.model.key_env_var} environment variable not set"
-        llm_response = self.conversation.prompt(response.prompt, system=self.system_prompt, attachments=response.attachments, key=api_key)
-        buf = []
-        last_update = 0
-        for chunk in llm_response:
-            buf.append(chunk)
-            t = time.time()
-            if t - last_update > RESPONSE_UPDATE_INTERVAL:
+        try:
+            api_key = os.getenv(self.model.key_env_var) # llm should handle this but some plugins don't
+            assert api_key is not None, f"{self.model.key_env_var} environment variable not set"
+            llm_response = self.conversation.prompt(response.prompt, system=self.system_prompt, attachments=response.attachments, key=api_key)
+            buf = []
+            last_update = 0
+            for chunk in llm_response:
+                buf.append(chunk)
+                t = time.time()
+                if t - last_update > RESPONSE_UPDATE_INTERVAL:
+                    self.call_from_thread(response.append, "".join(buf))
+                    buf.clear()
+                    last_update = t
+
+            if buf:
                 self.call_from_thread(response.append, "".join(buf))
-                buf.clear()
-                last_update = t
-
-        if buf:
-            self.call_from_thread(response.append, "".join(buf))
+            
+            self.call_from_thread(response.update_token_count, llm_response.input_tokens, llm_response.output_tokens)
         
-        self.call_from_thread(response.update_token_count, llm_response.input_tokens, llm_response.output_tokens)
-
-    def on_worker_state_changed(self, event: Worker.StateChanged):
-        if event.worker.state == WorkerState.ERROR:
-            response = self.query(Response).last() # TODO get correct response
-            response.update(f"ERROR: {event.worker.error}")
+        except Exception as e:
+            self.call_from_thread(response.update, f"ERROR: {e}")
 
 class TextEditor(ModalScreen):
     AUTO_FOCUS = "TextArea"
