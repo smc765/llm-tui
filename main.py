@@ -16,20 +16,20 @@ from tkinter import filedialog
 from screenshot import get_screenshot
 import subprocess
 import webbrowser
+import os
 
-DEFAULT_SYSTEM_PROMPT = "use $$...$$ delimiters for displayed equations and $...$ delimiters for inline math"
-DEFAULT_MODEL = "gpt-4o-mini"
+load_dotenv()
+
+DEFAULT_SYSTEM_PROMPT = os.getenv("DEFAULT_SYSTEM_PROMPT")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
 RESPONSE_UPDATE_INTERVAL = 0.1
 
 logger = logging.getLogger(__name__)
-
 parser = argparse.ArgumentParser()
 parser.add_argument("-d", "--debug", action="store_true")
 args = parser.parse_args()
 if args.debug:
     logging.basicConfig(level=logging.DEBUG, filename="debug.log")
-
-load_dotenv()
 
 class Prompt(Markdown):
     pass
@@ -66,6 +66,10 @@ class Response(Markdown):
             temp_md.close()
             subprocess.run(["pandoc", temp_md.name, "-s", "--mathjax", "-o", "out.html"])
             webbrowser.open("out.html")
+
+    def update_token_count(self, input_tokens: int | None, output_tokens: int | None):
+        if None not in (input_tokens, output_tokens):
+            self.border_subtitle += f" Input tokens: {input_tokens} Output tokens: {output_tokens}"
 
 class TuiApp(App):
     AUTO_FOCUS = "Input"
@@ -105,7 +109,7 @@ class TuiApp(App):
 
     @on(Response.Regenerate)
     async def regenerate(self, event: Response.Regenerate) -> None:
-        await self.add_response(event.prompt, event.attachments)
+        await self.get_response(event.prompt, event.attachments)
 
     def action_set_model(self) -> None:
         def set_model(model: str) -> None:
@@ -177,17 +181,20 @@ class TuiApp(App):
         elif len(self.attachments) == 0:
             return
 
-        await self.add_response(prompt, self.attachments.copy())
+        attachments = self.attachments.copy()
         self.clear_attachments()
+        await self.get_response(prompt, attachments)
 
-    async def add_response(self, prompt: str, attachments: list[llm.Attachment])-> None:
+    async def get_response(self, prompt: str, attachments: list[llm.Attachment])-> None:
         response = Response(prompt, attachments, self.model.model_id)
         await self.query_one(VerticalScroll).mount(response)
-        self.get_llm_response(response)
+        self.stream_response(response)
     
     @work(thread=True, exit_on_error=False)
-    def get_llm_response(self, response: Response) -> None:
-        llm_response = self.conversation.prompt(response.prompt, system=self.system_prompt, attachments=response.attachments)
+    def stream_response(self, response: Response) -> None:
+        api_key = os.getenv(self.model.key_env_var) # llm should handle this but some plugins don't
+        assert api_key is not None, f"{self.model.key_env_var} environment variable not set"
+        llm_response = self.conversation.prompt(response.prompt, system=self.system_prompt, attachments=response.attachments, key=api_key)
         buf = []
         last_update = 0
         for chunk in llm_response:
@@ -201,12 +208,11 @@ class TuiApp(App):
         if buf:
             self.call_from_thread(response.append, "".join(buf))
         
-        if None not in (llm_response.input_tokens, llm_response.output_tokens):
-            response.border_subtitle += f" Input tokens: {llm_response.input_tokens} Output tokens: {llm_response.output_tokens}"
+        self.call_from_thread(response.update_token_count, llm_response.input_tokens, llm_response.output_tokens)
 
     def on_worker_state_changed(self, event: Worker.StateChanged):
         if event.worker.state == WorkerState.ERROR:
-            response = self.query(Response).last()
+            response = self.query(Response).last() # TODO get correct response
             response.update(f"ERROR: {event.worker.error}")
 
 class TextEditor(ModalScreen):
