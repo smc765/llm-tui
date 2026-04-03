@@ -1,6 +1,7 @@
 import tkinter as tk
 from PIL import ImageGrab
 import platform
+from typing import BinaryIO
 
 if platform.system() == "Windows":
     import ctypes
@@ -75,11 +76,11 @@ def restore() -> None:
     if platform.system() == "Windows":
         ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 9)
 
-def get_screenshot(filename: str) -> None:
+def get_screenshot(file: BinaryIO) -> None:
     minimize()
     root = tk.Tk()
     app = Screenshot(root)
     root.mainloop()
     restore()
     assert app.screenshot is not None
-    app.screenshot.save(filename)
+    app.screenshot.save(file)

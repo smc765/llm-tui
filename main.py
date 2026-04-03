@@ -3,7 +3,7 @@ from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll, HorizontalGroup
 from textual.widgets import Footer, Input, Markdown, OptionList, Label, TextArea, Button
 from textual.screen import ModalScreen
-from textual.worker import Worker, WorkerState
+from textual.worker import Worker
 from textual.message import Message
 import llm
 from dotenv import load_dotenv
@@ -17,19 +17,22 @@ from screenshot import get_screenshot
 import subprocess
 import webbrowser
 import os
+import mimetypes
+import ast
+from typing import Any
 
 load_dotenv()
 
-DEFAULT_SYSTEM_PROMPT = os.getenv("DEFAULT_SYSTEM_PROMPT")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
+DEFAULT_MODEL = "gpt-4o-mini"
 RESPONSE_UPDATE_INTERVAL = 0.1
 
-logger = logging.getLogger(__name__)
 parser = argparse.ArgumentParser()
 parser.add_argument("-d", "--debug", action="store_true")
 args = parser.parse_args()
 if args.debug:
     logging.basicConfig(level=logging.DEBUG, filename="debug.log")
+
+logger = logging.getLogger(__name__)
 
 class Prompt(Markdown):
     pass
@@ -37,9 +40,9 @@ class Prompt(Markdown):
 class Response(Markdown):
     class Regenerate(Message):
         def __init__(self, prompt: str, attachments: list[llm.Attachment]):
+            super().__init__()
             self.prompt = prompt
             self.attachments = attachments
-            super().__init__()
 
     def __init__(self, prompt: str, attachments: list[llm.Attachment], model: str):
         super().__init__()
@@ -47,11 +50,13 @@ class Response(Markdown):
         self.attachments = attachments
         self.border_title = model
         self.border_subtitle = f"Attachments: {len(attachments)}"
+        self.worker: Worker | None = None
 
     def compose(self) -> ComposeResult:
         yield HorizontalGroup(
             Button("Regenerate", id="regenerate"),
-            Button("Open in Browser", id="open_in_browser")
+            Button("Open in Browser", id="open_in_browser"),
+            Button("Cancel", id="cancel"),
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -59,6 +64,8 @@ class Response(Markdown):
             self.open_in_browser()
         if event.button.id == "regenerate":
             self.post_message(self.Regenerate(self.prompt, self.attachments))
+        if event.button.id == "cancel":
+            self.worker.cancel()
 
     def open_in_browser(self) -> None:
         with tempfile.NamedTemporaryFile(delete_on_close=False, suffix=".md", mode="w", encoding="utf-8") as temp_md:
@@ -67,14 +74,14 @@ class Response(Markdown):
             subprocess.run(["pandoc", temp_md.name, "-s", "--mathjax", "-o", "out.html"])
             webbrowser.open("out.html")
 
-    def update_token_count(self, input_tokens: int | None, output_tokens: int | None):
+    def finalize(self, input_tokens: int | None, output_tokens: int | None) -> None:
+        self.query_one("#cancel").remove()
         if None not in (input_tokens, output_tokens):
             self.border_subtitle += f" Input tokens: {input_tokens} Output tokens: {output_tokens}"
 
 class TuiApp(App):
     AUTO_FOCUS = "Input"
     ENABLE_COMMAND_PALETTE = False
-    NOTIFICATION_TIMEOUT = 2.5
 
     BINDINGS = [
         ("ctrl+c", "quit"),
@@ -87,7 +94,23 @@ class TuiApp(App):
         ("f7", "clear_attachments", "Clear Attachments"),
     ]
 
-    CSS_PATH = "main.tcss"
+    CSS_PATH = "app.tcss"
+
+    def __init__(self, temp_dir: str):
+        super().__init__()
+        self.temp_dir = temp_dir
+        self.model: llm.Model = llm.get_model(os.getenv("DEFAULT_MODEL", DEFAULT_MODEL))
+        self.conversation: llm.Conversation = self.model.conversation()
+        self.system_prompt: str | None = os.getenv("DEFAULT_SYSTEM_PROMPT")
+        self.attachments: list[llm.Attachment] = []
+        self.max_tokens: int | None = None
+        self.temperature: float | None = None
+
+        if max_tokens := os.getenv("DEFAULT_MAX_TOKENS"):
+            self.max_tokens = ast.literal_eval(max_tokens)
+
+        if temperature := os.getenv("DEFAULT_TEMPERATURE"):
+            self.temperature = ast.literal_eval(temperature)
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll()
@@ -97,10 +120,6 @@ class TuiApp(App):
 
     def on_mount(self) -> None:
         self.query_one(VerticalScroll).anchor()
-        self.model = llm.get_model(DEFAULT_MODEL)
-        self.conversation = self.model.conversation()
-        self.system_prompt: str = DEFAULT_SYSTEM_PROMPT
-        self.attachments: list[llm.Attachment] = []
 
     @on(Input.Submitted)
     async def on_input(self, event: Input.Submitted) -> None:
@@ -135,19 +154,30 @@ class TuiApp(App):
         self.notify("context cleared")
 
     def action_attach_file(self) -> None:
-        filenames = filedialog.askopenfilenames()
+        filetypes = []
+        for mime_type in self.model.attachment_types:
+            filetypes.extend((mime_type, ext) for ext in mimetypes.guess_all_extensions(mime_type))
+
+        if not filetypes:
+            self.notify("this model does not support file uploads", title="Error")
+            return
+
+        filenames = filedialog.askopenfilenames(filetypes=filetypes)
         for f in filenames:
             self.attach_file(f)
 
     def action_attach_screenshot(self) -> None:
-        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        temp.close()
-        try:
-            get_screenshot(temp.name)
-        except AssertionError:
+        if "image/png" not in self.model.attachment_types:
+            self.notify("this model does not support image uploads", title="Error")
             return
 
-        self.attach_file(temp.name)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir=self.temp_dir) as temp:
+            try:
+                get_screenshot(temp)
+            except AssertionError:
+                return
+
+            self.attach_file(temp.name)
 
     def action_multiline_prompt(self) -> None:
         self.push_screen(TextEditor(), self.send_prompt)
@@ -170,6 +200,11 @@ class TuiApp(App):
         self.refresh_bindings()
 
     def attach_file(self, filename: str) -> None:
+        mime_type, _ = mimetypes.guess_file_type(filename)
+        if mime_type not in self.model.attachment_types:
+            self.notify("file type not supported by this model", title="Error")
+            return
+
         self.attachments.append(llm.Attachment(path=filename))
         self.query_one(VerticalScroll).mount(Prompt(f"Attached File: {filename}"))
         self.update_attachment_count()
@@ -188,17 +223,36 @@ class TuiApp(App):
     async def get_response(self, prompt: str, attachments: list[llm.Attachment])-> None:
         response = Response(prompt, attachments, self.model.model_id)
         await self.query_one(VerticalScroll).mount(response)
-        self.stream_response(response)
+        response.worker = self.stream_response(response, self.get_model_options())
     
+    def get_model_options(self) -> dict[str, Any]:
+        model_options = {}
+        model_fields = self.model.Options.model_fields.keys()
+        if "max_tokens" in model_fields and self.max_tokens is not None:
+            model_options["max_tokens"] = self.max_tokens
+
+        if "max_completion_tokens" in model_fields and self.max_tokens is not None:
+            model_options["max_completion_tokens"] = self.max_tokens 
+
+        if "temperature" in model_fields and self.temperature is not None:
+            model_options["temperature"] = self.temperature
+
+        logger.debug(f"model_options={model_options}")
+
+        return model_options
+
     @work(thread=True)
-    def stream_response(self, response: Response) -> None:
+    def stream_response(self, response: Response, model_options: dict[str, Any]) -> None:
+        api_key = os.getenv(self.model.key_env_var) # llm should handle this but some plugins don't
         try:
-            api_key = os.getenv(self.model.key_env_var) # llm should handle this but some plugins don't
             assert api_key is not None, f"{self.model.key_env_var} environment variable not set"
-            llm_response = self.conversation.prompt(response.prompt, system=self.system_prompt, attachments=response.attachments, key=api_key)
+            llm_response = self.conversation.prompt(response.prompt, system=self.system_prompt, attachments=response.attachments, key=api_key, **model_options)
             buf = []
             last_update = 0
             for chunk in llm_response:
+                if response.worker.is_cancelled:
+                    break
+
                 buf.append(chunk)
                 t = time.time()
                 if t - last_update > RESPONSE_UPDATE_INTERVAL:
@@ -208,11 +262,12 @@ class TuiApp(App):
 
             if buf:
                 self.call_from_thread(response.append, "".join(buf))
-            
-            self.call_from_thread(response.update_token_count, llm_response.input_tokens, llm_response.output_tokens)
         
         except Exception as e:
             self.call_from_thread(response.update, f"ERROR: {e}")
+
+        finally:
+            self.call_from_thread(response.finalize, llm_response.input_tokens, llm_response.output_tokens)
 
 class TextEditor(ModalScreen):
     AUTO_FOCUS = "TextArea"
@@ -279,5 +334,6 @@ class ModelMenu(ModalScreen):
         self.dismiss(event.option.prompt)
 
 if __name__ == "__main__":
-    app = TuiApp()
-    app.run()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        app = TuiApp(temp_dir)
+        app.run()

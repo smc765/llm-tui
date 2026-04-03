@@ -7,7 +7,7 @@ Prompt {
 }
 
 Response {
-    border: wide $success;
+    border: round $success;
     background: $success 10%;   
     color: $text;             
     margin: 1;      
@@ -20,8 +20,7 @@ Response HorizontalGroup {
 }
 
 Response HorizontalGroup Button {
-    border: none;
-    margin: 1;
+    border: round $success;
 }
 
 ModelMenu {
