@@ -21,8 +21,6 @@ import mimetypes
 import ast
 from typing import Any
 
-load_dotenv()
-
 DEFAULT_MODEL = "gpt-4o-mini"
 RESPONSE_UPDATE_INTERVAL = 0.1
 
@@ -33,6 +31,7 @@ if args.debug:
     logging.basicConfig(level=logging.DEBUG, filename="debug.log")
 
 logger = logging.getLogger(__name__)
+load_dotenv()
 
 class Prompt(Markdown):
     pass
@@ -223,7 +222,13 @@ class TuiApp(App):
     async def get_response(self, prompt: str, attachments: list[llm.Attachment])-> None:
         response = Response(prompt, attachments, self.model.model_id)
         await self.query_one(VerticalScroll).mount(response)
-        response.worker = self.stream_response(response, self.get_model_options())
+        model_options = self.get_model_options()
+        api_key = os.getenv(self.model.key_env_var) # llm should handle this but some plugins don't
+        response.worker = self.stream_response(response, model_options, api_key)
+        
+        logger.debug(f"prompt={prompt}")
+        logger.debug(f"attachments={attachments}")
+        logger.debug(f"model_options={model_options}")
     
     def get_model_options(self) -> dict[str, Any]:
         model_options = {}
@@ -237,13 +242,11 @@ class TuiApp(App):
         if "temperature" in model_fields and self.temperature is not None:
             model_options["temperature"] = self.temperature
 
-        logger.debug(f"model_options={model_options}")
-
         return model_options
 
     @work(thread=True)
-    def stream_response(self, response: Response, model_options: dict[str, Any]) -> None:
-        api_key = os.getenv(self.model.key_env_var) # llm should handle this but some plugins don't
+    def stream_response(self, response: Response, model_options: dict[str, Any], api_key: str | None) -> None:
+        input_tokens = output_tokens = None
         try:
             assert api_key is not None, f"{self.model.key_env_var} environment variable not set"
             llm_response = self.conversation.prompt(response.prompt, system=self.system_prompt, attachments=response.attachments, key=api_key, **model_options)
@@ -262,12 +265,15 @@ class TuiApp(App):
 
             if buf:
                 self.call_from_thread(response.append, "".join(buf))
-        
+
+            input_tokens, output_tokens = llm_response.input_tokens, llm_response.output_tokens
+
         except Exception as e:
             self.call_from_thread(response.update, f"ERROR: {e}")
+            logger.error(e)
 
         finally:
-            self.call_from_thread(response.finalize, llm_response.input_tokens, llm_response.output_tokens)
+            self.call_from_thread(response.finalize, input_tokens, output_tokens)
 
 class TextEditor(ModalScreen):
     AUTO_FOCUS = "TextArea"
