@@ -61,8 +61,10 @@ class Response(Markdown):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "open_in_browser":
             self.open_in_browser()
+
         if event.button.id == "regenerate":
             self.post_message(self.Regenerate(self.prompt, self.attachments))
+
         if event.button.id == "cancel":
             self.worker.cancel()
 
@@ -81,7 +83,7 @@ class Response(Markdown):
 class TuiApp(App):
     AUTO_FOCUS = "Input"
     ENABLE_COMMAND_PALETTE = False
-
+    CSS_PATH = "app.tcss"
     BINDINGS = [
         ("ctrl+c", "quit"),
         ("f1", "set_model", "Set Model"),
@@ -92,8 +94,6 @@ class TuiApp(App):
         ("f6", "multiline_prompt", "Multiline Prompt"),
         ("f7", "clear_attachments", "Clear Attachments"),
     ]
-
-    CSS_PATH = "app.tcss"
 
     def __init__(self, temp_dir: str):
         super().__init__()
@@ -141,6 +141,7 @@ class TuiApp(App):
         def set_system_prompt(prompt: str) -> None:
             if prompt.isspace() or prompt == "":
                 self.system_prompt = None
+
             else:
                 self.system_prompt = prompt
 
@@ -173,6 +174,7 @@ class TuiApp(App):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir=self.temp_dir) as temp:
             try:
                 get_screenshot(temp)
+
             except AssertionError:
                 return
 
@@ -188,6 +190,7 @@ class TuiApp(App):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:  
         if action == "clear_attachments" and len(self.attachments) == 0:
             return False
+
         return True
 
     def clear_attachments(self) -> None:
@@ -199,11 +202,6 @@ class TuiApp(App):
         self.refresh_bindings()
 
     def attach_file(self, filename: str) -> None:
-        mime_type, _ = mimetypes.guess_file_type(filename)
-        if mime_type not in self.model.attachment_types:
-            self.notify("file type not supported by this model", title="Error")
-            return
-
         self.attachments.append(llm.Attachment(path=filename))
         self.query_one(VerticalScroll).mount(Prompt(f"Attached File: {filename}"))
         self.update_attachment_count()
@@ -223,7 +221,7 @@ class TuiApp(App):
         response = Response(prompt, attachments, self.model.model_id)
         await self.query_one(VerticalScroll).mount(response)
         model_options = self.get_model_options()
-        api_key = os.getenv(self.model.key_env_var) # llm should handle this but some plugins don't
+        api_key = os.getenv(self.model.key_env_var)
         response.worker = self.stream_response(response, model_options, api_key)
         
         logger.debug(f"prompt={prompt}")
@@ -249,7 +247,13 @@ class TuiApp(App):
         input_tokens = output_tokens = None
         try:
             assert api_key is not None, f"{self.model.key_env_var} environment variable not set"
-            llm_response = self.conversation.prompt(response.prompt, system=self.system_prompt, attachments=response.attachments, key=api_key, **model_options)
+            llm_response = self.conversation.prompt(
+                response.prompt, 
+                system=self.system_prompt, 
+                attachments=response.attachments, 
+                key=api_key, 
+                **model_options
+            )
             buf = []
             last_update = 0
             for chunk in llm_response:
@@ -269,7 +273,7 @@ class TuiApp(App):
             input_tokens, output_tokens = llm_response.input_tokens, llm_response.output_tokens
 
         except Exception as e:
-            self.call_from_thread(response.update, f"ERROR: {e}")
+            self.call_from_thread(response.update, f"### Error\n>{e}")
             logger.error(e)
 
         finally:
@@ -277,7 +281,6 @@ class TuiApp(App):
 
 class TextEditor(ModalScreen):
     AUTO_FOCUS = "TextArea"
-
     BINDINGS = [
         ("ctrl+c", "app.quit"),
         ("escape", "app.pop_screen", "Back"),
@@ -309,6 +312,7 @@ class TextEditor(ModalScreen):
         with open(filename) as f:
             try:
                 text = f.read()
+
             except UnicodeDecodeError:
                 self.notify("Could not read file", title="Error")
                 return
@@ -319,7 +323,6 @@ class TextEditor(ModalScreen):
 
 class ModelMenu(ModalScreen):
     AUTO_FOCUS = "OptionList"
-
     BINDINGS = [
         ("ctrl+c", "app.quit"),
         ("escape", "app.pop_screen", "back"),
