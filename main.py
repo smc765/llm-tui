@@ -193,8 +193,8 @@ class TuiApp(App):
         self.notify("attachments cleared")
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:  
-        if action == "clear_attachments" and len(self.attachments) == 0:
-            return False
+        if action == "clear_attachments":
+            return bool(self.attachments)
 
         return True
 
@@ -212,10 +212,10 @@ class TuiApp(App):
         self.refresh_bindings()
 
     async def send_prompt(self, prompt: str)-> None:
-        if prompt != "":
+        if prompt:
             await self.query_one(VerticalScroll).mount(Prompt(prompt))
 
-        elif len(self.attachments) == 0:
+        elif not self.attachments:
             return
 
         attachments = self.attachments.copy()
@@ -316,7 +316,7 @@ class TextEditor(ModalScreen):
 
     def action_load_file(self) -> None:
         filename = filedialog.askopenfilename()
-        if filename == "":
+        if not filename:
             return
 
         with open(filename) as f:
