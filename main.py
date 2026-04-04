@@ -1,3 +1,20 @@
+import subprocess
+import webbrowser
+import os
+import mimetypes
+import ast
+import tempfile
+import argparse
+import logging
+import time
+import tkinter as tk
+from tkinter import filedialog
+from typing import Any
+from dataclasses import dataclass
+
+import llm
+from dotenv import load_dotenv
+
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll, HorizontalGroup
@@ -5,43 +22,26 @@ from textual.widgets import Footer, Input, Markdown, OptionList, Label, TextArea
 from textual.screen import ModalScreen
 from textual.worker import Worker
 from textual.message import Message
-import llm
-from dotenv import load_dotenv
-import tempfile
-import argparse
-import logging
-import time
-import tkinter as tk
-from tkinter import filedialog
+
 from screenshot import get_screenshot
-import subprocess
-import webbrowser
-import os
-import mimetypes
-import ast
-from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gpt-4o-mini"
 RESPONSE_UPDATE_INTERVAL = 0.1
 
-parser = argparse.ArgumentParser()
-parser.add_argument("-d", "--debug", action="store_true")
-args = parser.parse_args()
-if args.debug:
-    logging.basicConfig(level=logging.DEBUG, filename="debug.log")
-
-logger = logging.getLogger(__name__)
-load_dotenv()
 
 class Prompt(Markdown):
-    pass
+    """Markdown for prompt."""
+
 
 class Response(Markdown):
+    """Markdown for llm response."""
+
+    @dataclass
     class Regenerate(Message):
-        def __init__(self, prompt: str, attachments: list[llm.Attachment]):
-            super().__init__()
-            self.prompt = prompt
-            self.attachments = attachments
+        prompt: str
+        attachments: list[llm.Attachment]
 
     def __init__(self, prompt: str, attachments: list[llm.Attachment], model: str):
         super().__init__()
@@ -66,13 +66,20 @@ class Response(Markdown):
             self.post_message(self.Regenerate(self.prompt, self.attachments))
 
         if event.button.id == "cancel":
-            self.worker.cancel()
+            if self.worker is not None:
+                self.worker.cancel()
 
     def open_in_browser(self) -> None:
         with tempfile.NamedTemporaryFile(delete_on_close=False, suffix=".md", mode="w", encoding="utf-8") as temp_md:
             temp_md.write(self.source)
             temp_md.close()
-            subprocess.run(["pandoc", temp_md.name, "-s", "--mathjax", "-o", "out.html"])
+            try:
+                subprocess.run(["pandoc", temp_md.name, "-s", "--mathjax", "-o", "out.html"], check=True)
+
+            except subprocess.CalledProcessError as e:
+                logger.error(f"pandoc error: {e}")
+                return
+
             webbrowser.open("out.html")
 
     def finalize(self, input_tokens: int | None, output_tokens: int | None) -> None:
@@ -80,7 +87,9 @@ class Response(Markdown):
         if None not in (input_tokens, output_tokens):
             self.border_subtitle += f" Input tokens: {input_tokens} Output tokens: {output_tokens}"
 
+
 class TuiApp(App):
+
     AUTO_FOCUS = "Input"
     ENABLE_COMMAND_PALETTE = False
     CSS_PATH = "app.tcss"
@@ -91,7 +100,6 @@ class TuiApp(App):
         ("f3", "attach_file", "Attach File(s)"),
         ("f4", "attach_screenshot", "Screenshot"),
         ("f5", "clear_context", "Clear Context"),
-        ("f6", "multiline_prompt", "Multiline Prompt"),
         ("f7", "clear_attachments", "Clear Attachments"),
     ]
 
@@ -102,14 +110,12 @@ class TuiApp(App):
         self.conversation: llm.Conversation = self.model.conversation()
         self.system_prompt: str | None = os.getenv("DEFAULT_SYSTEM_PROMPT")
         self.attachments: list[llm.Attachment] = []
-        self.max_tokens: int | None = None
-        self.temperature: float | None = None
 
-        if max_tokens := os.getenv("DEFAULT_MAX_TOKENS"):
-            self.max_tokens = ast.literal_eval(max_tokens)
+        if model_options := os.getenv("MODEL_OPTIONS"):
+            self.model_options = ast.literal_eval(model_options)
 
-        if temperature := os.getenv("DEFAULT_TEMPERATURE"):
-            self.temperature = ast.literal_eval(temperature)
+        else:
+            self.model_options = {}
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll()
@@ -193,18 +199,18 @@ class TuiApp(App):
 
         return True
 
+    def attach_file(self, filename: str) -> None:
+        self.attachments.append(llm.Attachment(path=filename))
+        self.query_one(VerticalScroll).mount(Prompt(f"Attached File: {filename}"))
+        self.update_attachment_count()
+
     def clear_attachments(self) -> None:
         self.attachments.clear()
         self.update_attachment_count()
     
     def update_attachment_count(self) -> None:
-        self.query_one(Label).content = f"Attachments: {len(self.attachments)}"
+        self.query_one(Label).update(f"Attachments: {len(self.attachments)}")
         self.refresh_bindings()
-
-    def attach_file(self, filename: str) -> None:
-        self.attachments.append(llm.Attachment(path=filename))
-        self.query_one(VerticalScroll).mount(Prompt(f"Attached File: {filename}"))
-        self.update_attachment_count()
 
     async def send_prompt(self, prompt: str)-> None:
         if prompt != "":
@@ -217,39 +223,31 @@ class TuiApp(App):
         self.clear_attachments()
         await self.get_response(prompt, attachments)
 
-    async def get_response(self, prompt: str, attachments: list[llm.Attachment])-> None:
+    async def get_response(self, prompt: str, attachments: list[llm.Attachment]) -> None:
         response = Response(prompt, attachments, self.model.model_id)
         await self.query_one(VerticalScroll).mount(response)
-        model_options = self.get_model_options()
-        api_key = os.getenv(self.model.key_env_var)
-        response.worker = self.stream_response(response, model_options, api_key)
+        model_options = self.get_supported_model_options(self.model)
+        response.worker = self.stream_response(response, model_options, self.system_prompt)
         
+        logger.debug(f"model={self.model.model_id}")
+        logger.debug(f"system_prompt={self.system_prompt}")
         logger.debug(f"prompt={prompt}")
         logger.debug(f"attachments={attachments}")
         logger.debug(f"model_options={model_options}")
     
-    def get_model_options(self) -> dict[str, Any]:
-        model_options = {}
-        model_fields = self.model.Options.model_fields.keys()
-        if "max_tokens" in model_fields and self.max_tokens is not None:
-            model_options["max_tokens"] = self.max_tokens
-
-        if "max_completion_tokens" in model_fields and self.max_tokens is not None:
-            model_options["max_completion_tokens"] = self.max_tokens 
-
-        if "temperature" in model_fields and self.temperature is not None:
-            model_options["temperature"] = self.temperature
-
-        return model_options
-
+    def get_supported_model_options(self, model: llm.Model) -> dict[str, Any]:
+        model_keys = model.Options.model_fields.keys()
+        return {k: self.model_options[k] for k in model_keys if k in self.model_options}
+    
     @work(thread=True)
-    def stream_response(self, response: Response, model_options: dict[str, Any], api_key: str | None) -> None:
+    def stream_response(self, response: Response, model_options: dict[str, Any], system_prompt: str | None) -> None:
         input_tokens = output_tokens = None
         try:
-            assert api_key is not None, f"{self.model.key_env_var} environment variable not set"
+            api_key = self.get_api_key(self.model)
+
             llm_response = self.conversation.prompt(
                 response.prompt, 
-                system=self.system_prompt, 
+                system=system_prompt, 
                 attachments=response.attachments, 
                 key=api_key, 
                 **model_options
@@ -279,19 +277,31 @@ class TuiApp(App):
         finally:
             self.call_from_thread(response.finalize, input_tokens, output_tokens)
 
+    def get_api_key(self, model: llm.Model) -> str | None:
+        try:
+            return model.get_key()
+
+        except llm.errors.NeedsKeyException:
+            if model.key_env_var and (key := os.getenv(model.key_env_var)):
+                return key
+
+            raise
+
+
 class TextEditor(ModalScreen):
+
     AUTO_FOCUS = "TextArea"
     BINDINGS = [
         ("ctrl+c", "app.quit"),
         ("escape", "app.pop_screen", "Back"),
-        ("ctrl+s", "submit", "Submit"),
-        ("ctrl+l", "load_file", "Load File"),
-        ("ctrl+r", "clear", "Clear"),
+        ("f1", "submit", "Submit"),
+        ("f2", "clear", "Clear"),
+        ("f3", "load_file", "Load File"),
     ]
 
     def __init__(self, text: str | None = None):
-        self.text = "" if text is None else text
         super().__init__()
+        self.text = text if text else ""
 
     def compose(self) -> ComposeResult:
         yield TextArea(self.text)
@@ -321,7 +331,9 @@ class TextEditor(ModalScreen):
         text_area.clear()
         text_area.insert(text)
 
+
 class ModelMenu(ModalScreen):
+
     AUTO_FOCUS = "OptionList"
     BINDINGS = [
         ("ctrl+c", "app.quit"),
@@ -329,20 +341,35 @@ class ModelMenu(ModalScreen):
     ]
 
     def __init__(self, curr_model: str):
-        self.curr_model = curr_model
         super().__init__()
+        self.curr_model = curr_model
 
     def compose(self) -> ComposeResult:
         models = [model.model_id for model in llm.get_models()]
         option_list = OptionList(*models)
         option_list.highlighted = models.index(self.curr_model)
         yield option_list
+        yield Footer()
 
     @on(OptionList.OptionSelected)
     def on_input(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option.prompt)
 
-if __name__ == "__main__":
+
+def main():
+
+    load_dotenv()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-d", "--debug", action="store_true")
+    args = parser.parse_args()
+
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG, filename="debug.log")
+
     with tempfile.TemporaryDirectory() as temp_dir:
         app = TuiApp(temp_dir)
         app.run()
+
+
+if __name__ == "__main__":
+    main()

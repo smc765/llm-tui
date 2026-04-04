@@ -2,13 +2,13 @@
 
 ## Setup
 
-### 1. Setup Virtual Enviornment (Optional)
+### 1. Setup Virtual Environment (Optional)
 
-```powershell
+```bash
 python -m venv ./.venv
 ```
 
-```powershell
+```bash
 ./.venv/Scripts/Activate.ps1
 ```
 
@@ -22,28 +22,39 @@ python -m venv ./.venv
 
     llm keys set openai
 
-Or create a `.env` file with any of the following
+Or create a `.env` file in the same directory as `main.py` containing any the following lines:
 
-    OPENAI_API_KEY=your_key_here
-    ANTHROPIC_API_KEY=your_key_here
-    LLM_DEEPSEEK_KEY=your_key_here
-    XAI_API_KEY=your_key_here
+```bash
+OPENAI_API_KEY=your_key_here
+ANTHROPIC_API_KEY=your_key_here
+LLM_DEEPSEEK_KEY=your_key_here
+XAI_API_KEY=your_key_here
+```
 
-### 4. Install Extensions (Optional)
+### 4. Install Extensions (Optional) 
 
-- Claude  
+```bash
+llm install llm-anthropic
+```
 
-      llm install llm-anthropic
+```bash
+llm install llm-deepseek
+```
 
-- Deepseek  
-
-      llm install llm-deepseek
-
-- Grok  
-
-      llm install llm-grok
-
+```bash
+llm install llm-grok
+```
 
 ## Usage
 
     python main.py
+
+## Additional Configuration
+
+### Example `.env` file:
+
+```bash
+MODEL_OPTIONS={"temperature": 1.0, "max_tokens": 1000, "max_completion_tokens": 1000}
+DEFAULT_MODEL="gpt-4o"
+DEFAULT_SYSTEM_PROMPT="system prompt here"
+```
