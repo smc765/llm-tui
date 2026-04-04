@@ -58,17 +58,16 @@ class Response(Markdown):
             Button("Cancel", id="cancel"),
         )
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "open_in_browser":
-            self.open_in_browser()
+    @on(Button.Pressed, "#regenerate")
+    def regenerate(self) -> None:
+        self.post_message(self.Regenerate(self.prompt, self.attachments))
 
-        if event.button.id == "regenerate":
-            self.post_message(self.Regenerate(self.prompt, self.attachments))
+    @on(Button.Pressed, "#cancel")
+    def cancel(self) -> None:
+        if self.worker:
+            self.worker.cancel()
 
-        if event.button.id == "cancel":
-            if self.worker is not None:
-                self.worker.cancel()
-
+    @on(Button.Pressed, "#open_in_browser")
     def open_in_browser(self) -> None:
         with tempfile.NamedTemporaryFile(delete_on_close=False, suffix=".md", mode="w", encoding="utf-8") as temp_md:
             temp_md.write(self.source)
@@ -226,7 +225,7 @@ class TuiApp(App):
     async def get_response(self, prompt: str, attachments: list[llm.Attachment]) -> None:
         response = Response(prompt, attachments, self.model.model_id)
         await self.query_one(VerticalScroll).mount(response)
-        model_options = self.get_supported_model_options(self.model, self.model_options)
+        model_options = self.get_supported_options(self.model, self.model_options)
         response.worker = self.stream_response(response, model_options)
         
         logger.debug(f"model={self.model.model_id}")
@@ -235,7 +234,7 @@ class TuiApp(App):
         logger.debug(f"attachments={attachments}")
         logger.debug(f"model_options={model_options}")
     
-    def get_supported_model_options(self, model: llm.Model, options: dict[str, Any]) -> dict[str, Any]:
+    def get_supported_options(self, model: llm.Model, options: dict[str, Any]) -> dict[str, Any]:
         model_keys = model.Options.model_fields.keys()
         return {k: options[k] for k in model_keys if k in options}
     
@@ -357,9 +356,10 @@ class ModelMenu(ModalScreen):
         self.dismiss(event.option.prompt)
 
 
-def main():
+if __name__ == "__main__":
 
     load_dotenv()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--debug", action="store_true")
     args = parser.parse_args()
@@ -370,7 +370,3 @@ def main():
     with tempfile.TemporaryDirectory() as temp_dir:
         app = TuiApp(temp_dir)
         app.run()
-
-
-if __name__ == "__main__":
-    main()
