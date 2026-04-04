@@ -226,8 +226,8 @@ class TuiApp(App):
     async def get_response(self, prompt: str, attachments: list[llm.Attachment]) -> None:
         response = Response(prompt, attachments, self.model.model_id)
         await self.query_one(VerticalScroll).mount(response)
-        model_options = self.get_supported_model_options(self.model)
-        response.worker = self.stream_response(response, model_options, self.system_prompt)
+        model_options = self.get_supported_model_options(self.model, self.model_options)
+        response.worker = self.stream_response(response, model_options)
         
         logger.debug(f"model={self.model.model_id}")
         logger.debug(f"system_prompt={self.system_prompt}")
@@ -235,19 +235,19 @@ class TuiApp(App):
         logger.debug(f"attachments={attachments}")
         logger.debug(f"model_options={model_options}")
     
-    def get_supported_model_options(self, model: llm.Model) -> dict[str, Any]:
+    def get_supported_model_options(self, model: llm.Model, options: dict[str, Any]) -> dict[str, Any]:
         model_keys = model.Options.model_fields.keys()
-        return {k: self.model_options[k] for k in model_keys if k in self.model_options}
+        return {k: options[k] for k in model_keys if k in options}
     
     @work(thread=True)
-    def stream_response(self, response: Response, model_options: dict[str, Any], system_prompt: str | None) -> None:
+    def stream_response(self, response: Response, model_options: dict[str, Any]) -> None:
         input_tokens = output_tokens = None
         try:
             api_key = self.get_api_key(self.model)
 
             llm_response = self.conversation.prompt(
                 response.prompt, 
-                system=system_prompt, 
+                system=self.system_prompt, 
                 attachments=response.attachments, 
                 key=api_key, 
                 **model_options
@@ -282,8 +282,9 @@ class TuiApp(App):
             return model.get_key()
 
         except llm.errors.NeedsKeyException:
-            if model.key_env_var and (key := os.getenv(model.key_env_var)):
-                return key
+            if model.key_env_var:
+                if key := os.getenv(model.key_env_var):
+                    return key
 
             raise
 
