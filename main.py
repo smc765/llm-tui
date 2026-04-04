@@ -76,15 +76,16 @@ class Response(Markdown):
                 subprocess.run(["pandoc", temp_md.name, "-s", "--mathjax", "-o", "out.html"], check=True)
 
             except subprocess.CalledProcessError as e:
-                logger.error(f"pandoc error: {e}")
+                logger.error(e)
                 return
 
             webbrowser.open("out.html")
 
     def finalize(self, input_tokens: int | None, output_tokens: int | None) -> None:
-        self.query_one("#cancel").remove()
-        if None not in (input_tokens, output_tokens):
+        if input_tokens and output_tokens:
             self.border_subtitle += f" Input tokens: {input_tokens} Output tokens: {output_tokens}"
+
+        self.query_one("#cancel").remove()
 
 
 class TuiApp(App):
@@ -99,6 +100,7 @@ class TuiApp(App):
         ("f3", "attach_file", "Attach File(s)"),
         ("f4", "attach_screenshot", "Screenshot"),
         ("f5", "clear_context", "Clear Context"),
+        ("f6", "multiline_prompt", "Multiline Prompt"),
         ("f7", "clear_attachments", "Clear Attachments"),
     ]
 
@@ -240,7 +242,7 @@ class TuiApp(App):
     
     def get_supported_options(self, model: llm.Model, options: dict[str, Any]) -> dict[str, Any]:
         model_keys = model.Options.model_fields.keys()
-        return {k: options[k] for k in model_keys if k in options}
+        return {k: v for k, v in options.items() if k in model_keys}
     
     @work(thread=True)
     def stream_response(self, response: Response, model_options: dict[str, Any]) -> None:
