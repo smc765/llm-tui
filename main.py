@@ -138,7 +138,7 @@ class TuiApp(App):
         def set_model(model: str) -> None:
             self.model = llm.get_model(model)
             self.conversation = self.model.conversation()
-            self.notify(f"model set to: {model}")
+            self.notify(f"Model set to: {model}")
 
         self.push_screen(ModelMenu(self.model.model_id), set_model)
     
@@ -150,21 +150,21 @@ class TuiApp(App):
             else:
                 self.system_prompt = prompt
 
-            self.query_one(VerticalScroll).mount(Prompt(f"system prompt set to: {self.system_prompt}"))
+            self.query_one(VerticalScroll).mount(Prompt(f"System prompt set to: {self.system_prompt}"))
 
         self.push_screen(TextEditor(self.system_prompt), set_system_prompt)
 
     def action_clear_context(self) -> None:
         self.conversation = self.model.conversation()
-        self.notify("context cleared")
+        self.notify("Context cleared")
 
     def action_attach_file(self) -> None:
         filetypes = []
-        for mime_type in self.model.attachment_types:
-            filetypes.extend((mime_type, ext) for ext in mimetypes.guess_all_extensions(mime_type))
+        for mime in self.model.attachment_types:
+            filetypes.extend((mime, ext) for ext in mimetypes.guess_all_extensions(mime))
 
         if not filetypes:
-            self.notify("this model does not support file uploads", title="Error")
+            self.notify("This model does not support file uploads.", title="Error")
             return
 
         filenames = filedialog.askopenfilenames(filetypes=filetypes)
@@ -173,7 +173,7 @@ class TuiApp(App):
 
     def action_attach_screenshot(self) -> None:
         if "image/png" not in self.model.attachment_types:
-            self.notify("this model does not support image uploads", title="Error")
+            self.notify("This model does not support image uploads.", title="Error")
             return
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir=self.temp_dir) as temp:
@@ -199,8 +199,12 @@ class TuiApp(App):
         return True
 
     def attach_file(self, filename: str) -> None:
+        mime, _ = mimetypes.guess_type(filename)
+        if mime not in self.model.attachment_types:
+            self.notify("File type not supported by this model.", title="Warning")
+
         self.attachments.append(llm.Attachment(path=filename))
-        self.query_one(VerticalScroll).mount(Prompt(f"Attached File: {filename}"))
+        self.query_one(VerticalScroll).mount(Prompt(f"Attached file: {filename}"))
         self.update_attachment_count()
 
     def clear_attachments(self) -> None:
@@ -337,7 +341,7 @@ class ModelMenu(ModalScreen):
     AUTO_FOCUS = "OptionList"
     BINDINGS = [
         ("ctrl+c", "app.quit"),
-        ("escape", "app.pop_screen", "back"),
+        ("escape", "app.pop_screen", "Back"),
     ]
 
     def __init__(self, curr_model: str):
