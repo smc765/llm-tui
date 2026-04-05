@@ -1,5 +1,7 @@
 # llm-tui
 
+A simple terminal user interface for [LLM](https://llm.datasette.io/en/stable/).  
+
 <img width="1920" height="900" alt="demo0" src="https://github.com/user-attachments/assets/cefba88a-3391-433d-b37c-81b291411ad9" />
 
 ## Setup

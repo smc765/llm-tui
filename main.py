@@ -233,6 +233,7 @@ class TuiApp(App):
         await self.query_one(VerticalScroll).mount(response)
         model_options = self.get_supported_options(self.model, self.model_options)
         response.worker = self.stream_response(response, model_options)
+        self.query_one(VerticalScroll).anchor()
         
         logger.debug(f"model={self.model.model_id}")
         logger.debug(f"system_prompt={self.system_prompt}")
