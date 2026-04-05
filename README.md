@@ -1,6 +1,6 @@
 # llm-tui
 
-A simple terminal user interface for [LLM](https://llm.datasette.io/en/stable/).  
+A simple terminal UI for [llm](https://github.com/simonw/llm).  
 
 <img width="1920" height="900" alt="demo0" src="https://github.com/user-attachments/assets/cefba88a-3391-433d-b37c-81b291411ad9" />
 
@@ -20,7 +20,7 @@ python -m venv ./.venv
 
     pip install -r requirements.txt
 
-#### [Pandoc](https://github.com/jgm/pandoc/releases/tag/3.9.0.2)
+#### Install [Pandoc](https://github.com/jgm/pandoc/releases/tag/3.9.0.2)
 
 ### 3. Set API Keys
 

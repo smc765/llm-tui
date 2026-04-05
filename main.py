@@ -18,10 +18,18 @@ from dotenv import load_dotenv
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll, HorizontalGroup
-from textual.widgets import Footer, Input, Markdown, OptionList, Label, TextArea, Button
 from textual.screen import ModalScreen
 from textual.worker import Worker
 from textual.message import Message
+from textual.widgets import (
+    Footer,
+    Input,
+    Markdown,
+    OptionList,
+    Label,
+    TextArea,
+    Button,
+)
 
 from screenshot import get_screenshot
 
@@ -72,8 +80,13 @@ class Response(Markdown):
         with tempfile.NamedTemporaryFile(delete_on_close=False, suffix=".md", mode="w", encoding="utf-8") as temp_md:
             temp_md.write(self.source)
             temp_md.close()
+            cmd = [
+                "pandoc", temp_md.name,
+                "-s", "--mathjax",
+                "-o", "out.html",
+            ]
             try:
-                subprocess.run(["pandoc", temp_md.name, "-s", "--mathjax", "-o", "out.html"], check=True)
+                subprocess.run(cmd, check=True)
 
             except subprocess.CalledProcessError as e:
                 logger.error(e)
@@ -107,16 +120,14 @@ class TuiApp(App):
     def __init__(self, temp_dir: str):
         super().__init__()
         self.temp_dir = temp_dir
-        self.model: llm.Model = llm.get_model(os.getenv("DEFAULT_MODEL", DEFAULT_MODEL))
-        self.conversation: llm.Conversation = self.model.conversation()
+        self.model = llm.get_model(os.getenv("DEFAULT_MODEL", DEFAULT_MODEL))
+        self.conversation = self.model.conversation()
         self.system_prompt: str | None = os.getenv("DEFAULT_SYSTEM_PROMPT")
         self.attachments: list[llm.Attachment] = []
+        self.model_options: dict[str, Any] = {}
 
         if model_options := os.getenv("MODEL_OPTIONS"):
             self.model_options = ast.literal_eval(model_options)
-
-        else:
-            self.model_options = {}
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll()
@@ -146,13 +157,15 @@ class TuiApp(App):
     
     def action_edit_system_prompt(self) -> None:
         def set_system_prompt(prompt: str) -> None:
-            if prompt.isspace() or prompt == "":
+            if not prompt.strip():
                 self.system_prompt = None
 
             else:
                 self.system_prompt = prompt
 
-            self.query_one(VerticalScroll).mount(Prompt(f"System prompt set to: {self.system_prompt}"))
+            self.query_one(VerticalScroll).mount(
+                Prompt(f"System prompt set to: {self.system_prompt}")
+            )
 
         self.push_screen(TextEditor(self.system_prompt), set_system_prompt)
 
@@ -229,11 +242,11 @@ class TuiApp(App):
         await self.get_response(prompt, attachments)
 
     async def get_response(self, prompt: str, attachments: list[llm.Attachment]) -> None:
+        self.query_one(VerticalScroll).anchor()
         response = Response(prompt, attachments, self.model.model_id)
         await self.query_one(VerticalScroll).mount(response)
         model_options = self.get_supported_options(self.model, self.model_options)
         response.worker = self.stream_response(response, model_options)
-        self.query_one(VerticalScroll).anchor()
         
         logger.debug(f"model={self.model.model_id}")
         logger.debug(f"system_prompt={self.system_prompt}")
@@ -242,8 +255,8 @@ class TuiApp(App):
         logger.debug(f"model_options={model_options}")
     
     def get_supported_options(self, model: llm.Model, options: dict[str, Any]) -> dict[str, Any]:
-        model_keys = model.Options.model_fields.keys()
-        return {k: v for k, v in options.items() if k in model_keys}
+        keys = model.Options.model_fields.keys()
+        return {k: v for k, v in options.items() if k in keys}
     
     @work(thread=True)
     def stream_response(self, response: Response, model_options: dict[str, Any]) -> None:
@@ -274,7 +287,8 @@ class TuiApp(App):
             if buf:
                 self.call_from_thread(response.append, "".join(buf))
 
-            input_tokens, output_tokens = llm_response.input_tokens, llm_response.output_tokens
+            input_tokens = llm_response.input_tokens
+            output_tokens = llm_response.output_tokens
 
         except Exception as e:
             self.call_from_thread(response.update, f"### Error\n>{e}")
@@ -363,9 +377,7 @@ class ModelMenu(ModalScreen):
         self.dismiss(event.option.prompt)
 
 
-if __name__ == "__main__":
-
-    load_dotenv()
+def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--debug", action="store_true")
@@ -374,6 +386,12 @@ if __name__ == "__main__":
     if args.debug:
         logging.basicConfig(level=logging.DEBUG, filename="debug.log")
 
+    load_dotenv()
+
     with tempfile.TemporaryDirectory() as temp_dir:
         app = TuiApp(temp_dir)
         app.run()
+
+
+if __name__ == "__main__":
+    main()
