@@ -21,6 +21,7 @@ from textual.containers import VerticalScroll, HorizontalGroup
 from textual.screen import ModalScreen
 from textual.worker import Worker
 from textual.message import Message
+from textual.events import Paste
 from textual.widgets import (
     Footer,
     Input,
@@ -101,6 +102,17 @@ class Response(Markdown):
         self.query_one("#cancel").remove()
 
 
+class PromptInput(Input):
+
+    def _on_paste(self, event: Paste) -> None:
+        event.stop()
+        if self.value or not event.text:
+            return
+
+        if len(event.text.splitlines()) > 1:
+            self.post_message(self.Submitted(self, event.text, None))
+
+
 class TuiApp(App):
 
     AUTO_FOCUS = "Input"
@@ -132,11 +144,11 @@ class TuiApp(App):
     def compose(self) -> ComposeResult:
         yield VerticalScroll()
         yield Label("Attachments: 0")
-        yield Input()
+        yield PromptInput()
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one(VerticalScroll).anchor()
+        self.anchor_scroll()
 
     @on(Input.Submitted)
     async def on_input(self, event: Input.Submitted) -> None:
@@ -163,9 +175,7 @@ class TuiApp(App):
             else:
                 self.system_prompt = prompt
 
-            self.query_one(VerticalScroll).mount(
-                Prompt(f"System prompt set to: {self.system_prompt}")
-            )
+            self.anchor_scroll().mount(Prompt(f"System prompt set to: {self.system_prompt}"))
 
         self.push_screen(TextEditor(self.system_prompt), set_system_prompt)
 
@@ -219,7 +229,7 @@ class TuiApp(App):
             self.notify("File type not supported by this model.", title="Warning")
 
         self.attachments.append(llm.Attachment(path=filename))
-        self.query_one(VerticalScroll).mount(Prompt(f"Attached file: {filename}"))
+        self.anchor_scroll().mount(Prompt(f"Attached file: {filename}"))
         self.update_attachment_count()
 
     def clear_attachments(self) -> None:
@@ -230,9 +240,9 @@ class TuiApp(App):
         self.query_one(Label).update(f"Attachments: {len(self.attachments)}")
         self.refresh_bindings()
 
-    async def send_prompt(self, prompt: str)-> None:
+    async def send_prompt(self, prompt: str) -> None:
         if prompt:
-            await self.query_one(VerticalScroll).mount(Prompt(prompt))
+            await self.anchor_scroll().mount(Prompt(prompt))
 
         elif not self.attachments:
             return
@@ -242,9 +252,8 @@ class TuiApp(App):
         await self.get_response(prompt, attachments)
 
     async def get_response(self, prompt: str, attachments: list[llm.Attachment]) -> None:
-        self.query_one(VerticalScroll).anchor()
         response = Response(prompt, attachments, self.model.model_id)
-        await self.query_one(VerticalScroll).mount(response)
+        await self.anchor_scroll().mount(response)
         model_options = self.get_supported_options(self.model, self.model_options)
         response.worker = self.stream_response(response, model_options)
         
@@ -257,6 +266,11 @@ class TuiApp(App):
     def get_supported_options(self, model: llm.Model, options: dict[str, Any]) -> dict[str, Any]:
         keys = model.Options.model_fields.keys()
         return {k: v for k, v in options.items() if k in keys}
+
+    def anchor_scroll(self) -> VerticalScroll:
+        scroll = self.query_one(VerticalScroll)
+        scroll.anchor()
+        return scroll
     
     @work(thread=True)
     def stream_response(self, response: Response, model_options: dict[str, Any]) -> None:

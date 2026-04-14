@@ -1,12 +1,14 @@
+import platform
 import tkinter as tk
 from PIL import ImageGrab
-import platform
 from typing import BinaryIO
 
 if platform.system() == "Windows":
     import ctypes
 
+
 class Screenshot:
+
     def __init__(self, root):
         self.root = root
 
@@ -65,6 +67,7 @@ class Screenshot:
         
         self.screenshot = ImageGrab.grab(bbox=bbox)
         self.root.destroy()
+
 
 def minimize() -> None:
     """minimize console window"""
