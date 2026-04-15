@@ -148,7 +148,7 @@ class TuiApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.anchor_scroll()
+        self.get_vertical_scroll()
 
     @on(Input.Submitted)
     async def on_input(self, event: Input.Submitted) -> None:
@@ -175,7 +175,7 @@ class TuiApp(App):
             else:
                 self.system_prompt = prompt
 
-            self.anchor_scroll().mount(Prompt(f"System prompt set to: {self.system_prompt}"))
+            self.get_vertical_scroll().mount(Prompt(f"System prompt set to: {self.system_prompt}"))
 
         self.push_screen(TextEditor(self.system_prompt), set_system_prompt)
 
@@ -188,19 +188,11 @@ class TuiApp(App):
         for mime in self.model.attachment_types:
             filetypes.extend((mime, ext) for ext in mimetypes.guess_all_extensions(mime))
 
-        if not filetypes:
-            self.notify("This model does not support file uploads.", title="Error")
-            return
-
         filenames = filedialog.askopenfilenames(filetypes=filetypes)
         for f in filenames:
             self.attach_file(f)
 
     def action_attach_screenshot(self) -> None:
-        if "image/png" not in self.model.attachment_types:
-            self.notify("This model does not support image uploads.", title="Error")
-            return
-
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir=self.temp_dir) as temp:
             try:
                 get_screenshot(temp)
@@ -221,6 +213,12 @@ class TuiApp(App):
         if action == "clear_attachments":
             return bool(self.attachments)
 
+        if action == "attach_screenshot":
+            return "image/png" in self.model.attachment_types
+
+        if action == "attach_file":
+            return bool(self.model.attachment_types)
+
         return True
 
     def attach_file(self, filename: str) -> None:
@@ -229,20 +227,20 @@ class TuiApp(App):
             self.notify("File type not supported by this model.", title="Warning")
 
         self.attachments.append(llm.Attachment(path=filename))
-        self.anchor_scroll().mount(Prompt(f"Attached file: {filename}"))
-        self.update_attachment_count()
+        self.get_vertical_scroll().mount(Prompt(f"Attached file: {filename}"))
+        self.update_gui()
 
     def clear_attachments(self) -> None:
         self.attachments.clear()
-        self.update_attachment_count()
+        self.update_gui()
     
-    def update_attachment_count(self) -> None:
+    def update_gui(self) -> None:
         self.query_one(Label).update(f"Attachments: {len(self.attachments)}")
         self.refresh_bindings()
 
     async def send_prompt(self, prompt: str) -> None:
         if prompt:
-            await self.anchor_scroll().mount(Prompt(prompt))
+            await self.get_vertical_scroll().mount(Prompt(prompt))
 
         elif not self.attachments:
             return
@@ -253,7 +251,7 @@ class TuiApp(App):
 
     async def get_response(self, prompt: str, attachments: list[llm.Attachment]) -> None:
         response = Response(prompt, attachments, self.model.model_id)
-        await self.anchor_scroll().mount(response)
+        await self.get_vertical_scroll().mount(response)
         model_options = self.get_supported_options(self.model, self.model_options)
         response.worker = self.stream_response(response, model_options)
         
@@ -262,15 +260,6 @@ class TuiApp(App):
         logger.debug(f"prompt={prompt}")
         logger.debug(f"attachments={attachments}")
         logger.debug(f"model_options={model_options}")
-    
-    def get_supported_options(self, model: llm.Model, options: dict[str, Any]) -> dict[str, Any]:
-        keys = model.Options.model_fields.keys()
-        return {k: v for k, v in options.items() if k in keys}
-
-    def anchor_scroll(self) -> VerticalScroll:
-        scroll = self.query_one(VerticalScroll)
-        scroll.anchor()
-        return scroll
     
     @work(thread=True)
     def stream_response(self, response: Response, model_options: dict[str, Any]) -> None:
@@ -321,6 +310,15 @@ class TuiApp(App):
                     return key
 
             raise
+    
+    def get_supported_options(self, model: llm.Model, options: dict[str, Any]) -> dict[str, Any]:
+        keys = model.Options.model_fields.keys()
+        return {k: v for k, v in options.items() if k in keys}
+
+    def get_vertical_scroll(self) -> VerticalScroll:
+        vs = self.query_one(VerticalScroll)
+        vs.anchor()
+        return vs
 
 
 class TextEditor(ModalScreen):
