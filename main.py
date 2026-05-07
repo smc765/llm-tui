@@ -8,6 +8,7 @@ import argparse
 import logging
 import time
 import tkinter as tk
+import re
 from tkinter import filedialog
 from typing import Any
 from dataclasses import dataclass
@@ -52,11 +53,11 @@ class Response(Markdown):
         prompt: str
         attachments: list[llm.Attachment]
 
-    def __init__(self, prompt: str, attachments: list[llm.Attachment], model: str):
+    def __init__(self, prompt: str, attachments: list[llm.Attachment], model_id: str):
         super().__init__()
         self.prompt = prompt
         self.attachments = attachments
-        self.border_title = model
+        self.model_id = model_id
         self.border_subtitle = f"Attachments: {len(attachments)}"
         self.worker: Worker | None = None
 
@@ -66,6 +67,10 @@ class Response(Markdown):
             Button("Open in Browser", id="open_in_browser"),
             Button("Cancel", id="cancel"),
         )
+
+    def on_mount(self) -> None:
+        self.border_title = self.model_id
+        self.update_subtitle()
 
     @on(Button.Pressed, "#regenerate")
     def regenerate(self) -> None:
@@ -78,8 +83,10 @@ class Response(Markdown):
 
     @on(Button.Pressed, "#open_in_browser")
     def open_in_browser(self) -> None:
+        # text = re.sub(r"\\\[(.*?)\\\]", r"$$\1$$", self.source, flags=re.DOTALL)
+        text = self.source
         with tempfile.NamedTemporaryFile(delete_on_close=False, suffix=".md", mode="w", encoding="utf-8") as temp_md:
-            temp_md.write(self.source)
+            temp_md.write(text)
             temp_md.close()
             cmd = [
                 "pandoc", temp_md.name,
@@ -95,10 +102,14 @@ class Response(Markdown):
 
             webbrowser.open("out.html")
 
-    def finalize(self, input_tokens: int | None, output_tokens: int | None) -> None:
+    def update_subtitle(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
         if input_tokens and output_tokens:
-            self.border_subtitle += f" Input tokens: {input_tokens} Output tokens: {output_tokens}"
+            self.border_subtitle = f"Attachments: {len(self.attachments)} Input tokens: {input_tokens} Output tokens: {output_tokens}"
+            
+        else:
+            self.border_subtitle = f"Attachments: {len(self.attachments)}"
 
+    def finalize(self) -> None:
         self.query_one("#cancel").remove()
 
 
@@ -134,16 +145,18 @@ class TuiApp(App):
         self.temp_dir = temp_dir
         self.model = llm.get_model(os.getenv("DEFAULT_MODEL", DEFAULT_MODEL))
         self.conversation = self.model.conversation()
-        self.system_prompt: str | None = os.getenv("DEFAULT_SYSTEM_PROMPT")
+        self.system_prompt = os.getenv("DEFAULT_SYSTEM_PROMPT")
         self.attachments: list[llm.Attachment] = []
         self.model_options: dict[str, Any] = {}
+        self.input_tokens = 0
+        self.output_tokens = 0
 
         if model_options := os.getenv("MODEL_OPTIONS"):
             self.model_options = ast.literal_eval(model_options)
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll()
-        yield Label("Attachments: 0")
+        yield Label()
         yield PromptInput()
         yield Footer()
 
@@ -161,8 +174,10 @@ class TuiApp(App):
 
     def action_set_model(self) -> None:
         def set_model(model: str) -> None:
-            self.model = llm.get_model(model)
-            self.conversation = self.model.conversation()
+            if model != self.model.model_id:
+                self.model = llm.get_model(model)
+                self.clear_context()
+                
             self.notify(f"Model set to: {model}")
 
         self.push_screen(ModelMenu(self.model.model_id), set_model)
@@ -180,7 +195,7 @@ class TuiApp(App):
         self.push_screen(TextEditor(self.system_prompt), set_system_prompt)
 
     def action_clear_context(self) -> None:
-        self.conversation = self.model.conversation()
+        self.clear_context()
         self.notify("Context cleared")
 
     def action_attach_file(self) -> None:
@@ -219,6 +234,9 @@ class TuiApp(App):
         if action == "attach_file":
             return bool(self.model.attachment_types)
 
+        if action == "clear_context":
+            return self.input_tokens != 0
+
         return True
 
     def attach_file(self, filename: str) -> None:
@@ -233,9 +251,20 @@ class TuiApp(App):
     def clear_attachments(self) -> None:
         self.attachments.clear()
         self.update_gui()
+
+    def clear_context(self) -> None:
+        self.conversation = self.model.conversation()
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.update_gui()
     
     def update_gui(self) -> None:
-        self.query_one(Label).update(f"Attachments: {len(self.attachments)}")
+        text = f"Attachments: {len(self.attachments)} " if self.model.attachment_types else ''
+        
+        if self.input_tokens != -1:
+            text += f"Input Tokens: {self.input_tokens} Output Tokens: {self.output_tokens}"
+
+        self.query_one(Label).update(text)
         self.refresh_bindings()
 
     async def send_prompt(self, prompt: str) -> None:
@@ -298,7 +327,22 @@ class TuiApp(App):
             logger.error(e)
 
         finally:
-            self.call_from_thread(response.finalize, input_tokens, output_tokens)
+            self.call_from_thread(response.finalize)
+
+            if input_tokens and output_tokens:
+                if self.input_tokens == -1:
+                    self.input_tokens = input_tokens
+                    self.output_tokens = output_tokens
+                else:
+                    self.input_tokens += input_tokens
+                    self.output_tokens += output_tokens
+
+                self.call_from_thread(response.update_subtitle, input_tokens, output_tokens)
+
+            else:
+                self.input_tokens = -1
+
+            self.call_from_thread(self.update_gui)
 
     def get_api_key(self, model: llm.Model) -> str | None:
         try:
