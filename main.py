@@ -82,12 +82,10 @@ class Response(Markdown):
             self.worker.cancel()
 
     @on(Button.Pressed, "#open_in_browser")
-    def open_in_browser(self) -> None:
+    def open_in_browser(self) -> None: # TODO fis ts
         if self.pandoc_path is None:
             self.app.get_vertical_scroll().mount(Prompt("Install [Pandoc](https://pandoc.org/installing.html) to use this feature or set the PANDOC_PATH environment variable if already installed."))
             return
-
-        # text = re.sub(r"\\\[(.*?)\\\]", r"$$\1$$", self.source, flags=re.DOTALL) # failed attempt to convert delimiters
 
         with tempfile.NamedTemporaryFile(delete_on_close=False, suffix=".md", mode="w", encoding="utf-8") as temp_md:
             temp_md.write(self.source)
@@ -118,7 +116,7 @@ class Response(Markdown):
 #     <body>
 #         <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 #         <div>
-#         {self.source} # TODO
+#         {self.source}
 #         </div>
 #     </body>
 # </html>'''
