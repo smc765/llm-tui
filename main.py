@@ -94,7 +94,7 @@ class Response(Markdown):
             temp_md.close()
             cmd = [
                 self.pandoc_path, temp_md.name,
-                # "-s", "--mathjax",
+                "-s", "--mathjax",
                 "-o", "out.html",
             ]
             try:
@@ -118,7 +118,7 @@ class Response(Markdown):
 #     <body>
 #         <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 #         <div>
-#         {self.source} # TODO this works but should use pandoc to render markdown
+#         {self.source} # TODO
 #         </div>
 #     </body>
 # </html>'''
