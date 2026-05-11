@@ -69,8 +69,6 @@ class Response(Markdown):
     def on_mount(self) -> None:
         self.border_title = self.model_id
         self.update_subtitle()
-        # if self.app.pandoc_path is None:
-        #     self.query_one("#open_in_brownser").remove()
 
     @on(Button.Pressed, "#regenerate")
     async def regenerate(self) -> None:
@@ -82,7 +80,7 @@ class Response(Markdown):
             self.worker.cancel()
 
     @on(Button.Pressed, "#open_in_browser")
-    def open_in_browser(self) -> None: # TODO ts is cursed but usually works
+    def open_in_browser(self) -> None:
         if self.app.pandoc_path is None:
             self.app.get_vertical_scroll().mount(Prompt("Pandoc executable not found. [Install Pandoc](https://pandoc.org/installing.html) and ensure it is in PATH or set the PANDOC_PATH environment variable."))
             return
@@ -126,11 +124,10 @@ class Response(Markdown):
             f.write(self.source)
 
     def update_subtitle(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
+        self.border_subtitle = f"Attachments: {len(self.attachments)} " if self.app.model.attachment_types else ""
+
         if input_tokens and output_tokens:
-            self.border_subtitle = f"Attachments: {len(self.attachments)} Input tokens: {input_tokens} Output tokens: {output_tokens}"
-            
-        else:
-            self.border_subtitle = f"Attachments: {len(self.attachments)}"
+            self.border_subtitle += f"Input tokens: {input_tokens} Output tokens: {output_tokens}"
 
 
 class PromptInput(Input):
