@@ -9,6 +9,7 @@ import logging
 import time
 import tkinter as tk
 import re
+import shutil
 from tkinter import filedialog
 from typing import Any
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ from screenshot import get_screenshot
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gpt-5-nano" # cheapest as of 5/26
 RESPONSE_UPDATE_INTERVAL = 0.1
 
 
@@ -49,13 +50,12 @@ class Prompt(Markdown):
 class Response(Markdown):
     """Markdown for llm response."""
 
-    def __init__(self, prompt: str, attachments: list[llm.Attachment], model_id: str, pandoc_path: str | None):
+    def __init__(self, prompt: str, attachments: list[llm.Attachment], model_id: str):
         super().__init__()
         self.prompt = prompt
         self.attachments = attachments
         self.model_id = model_id
         self.worker: Worker | None = None
-        self.pandoc_path = pandoc_path
 
     def compose(self) -> ComposeResult:
         yield HorizontalGroup(
@@ -63,13 +63,13 @@ class Response(Markdown):
             Button("Open in Browser", id="open_in_browser"),
             Button("Cancel", id="cancel"),
             Button("Copy to Clipboard", id="copy"),
-            # Button("Save As", id="save_as"), # TODO
+            Button("Save As", id="save_as"),
         )
 
     def on_mount(self) -> None:
         self.border_title = self.model_id
         self.update_subtitle()
-        # if self.pandoc_path is None:
+        # if self.app.pandoc_path is None:
         #     self.query_one("#open_in_brownser").remove()
 
     @on(Button.Pressed, "#regenerate")
@@ -82,45 +82,31 @@ class Response(Markdown):
             self.worker.cancel()
 
     @on(Button.Pressed, "#open_in_browser")
-    def open_in_browser(self) -> None: # TODO fis ts
-        if self.pandoc_path is None:
-            self.app.get_vertical_scroll().mount(Prompt("Install [Pandoc](https://pandoc.org/installing.html) to use this feature or set the PANDOC_PATH environment variable if already installed."))
+    def open_in_browser(self) -> None: # TODO ts is cursed but usually works
+        if self.app.pandoc_path is None:
+            self.app.get_vertical_scroll().mount(Prompt("Pandoc executable not found. [Install Pandoc](https://pandoc.org/installing.html) and ensure it is in PATH or set the PANDOC_PATH environment variable."))
             return
-
+        
         with tempfile.NamedTemporaryFile(delete_on_close=False, suffix=".md", mode="w", encoding="utf-8") as temp_md:
             temp_md.write(self.source)
             temp_md.close()
-            cmd = [
-                self.pandoc_path, temp_md.name,
-                "-s", "--mathjax",
-                "-o", "out.html",
-            ]
             try:
-                subprocess.run(cmd, check=True)
-
-            except subprocess.CalledProcessError as e:
+                result = subprocess.run(
+                    [
+                        self.app.pandoc_path, temp_md.name,
+                        "--from", "markdown+tex_math_dollars+tex_math_single_backslash",
+                        "--to", "html",
+                        "--standalone",
+                        "--katex",
+                        "-o", "out.html",
+                    ],
+                check=True,
+                )
+            
+            except (subprocess.CalledProcessError, OSError) as e:
                 logger.error(e)
+                self.app.get_vertical_scroll().mount(Prompt(f"### Error\n>{e}"))
                 return
-
-#         with open("out.html","w") as f:
-#             f.write(f'''
-# <!DOCTYPE html>
-# <html>
-#     <head>
-#         <title>{self.model_id}</title>
-#         <style>
-#             :root {{color-scheme: dark;
-#             font-family: Arial, Helvetica, sans-serif;}}
-#         </style>
-#     </head>
-#     <body>
-#         <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-#         <div>
-#         {self.source}
-#         </div>
-#     </body>
-# </html>'''
-#             )
 
         if os.path.isfile("out.html"):
             webbrowser.open("out.html")
@@ -131,7 +117,13 @@ class Response(Markdown):
 
     @on(Button.Pressed, "#save_as")
     def save_as(self) -> None:
-        raise NotImplementedError
+        filetypes = [("Markdown File", "*.md"), ("Text File", "*.txt")]
+        filename = filedialog.asksaveasfilename(filetypes=filetypes, defaultextension=filetypes)
+        if not filename:
+            return
+        
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(self.source)
 
     def update_subtitle(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
         if input_tokens and output_tokens:
@@ -189,12 +181,9 @@ class TuiApp(App):
 
         self.parse_model_options(os.getenv("MODEL_OPTIONS"))
 
-        self.pandoc_path = None
-        if (path := os.getenv("PANDOC_PATH")) and os.path.isfile(path):
-            self.pandoc_path = path
-
-        elif "pandoc" in os.getenv("PATH", "").lower():
-            self.pandoc_path = "pandoc"
+        self.pandoc_path = os.getenv("PANDOC_PATH")
+        if self.pandoc_path is None:
+            self.pandoc_path = shutil.which("pandoc")
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll()
@@ -315,7 +304,7 @@ class TuiApp(App):
         self.update_gui()
     
     def update_gui(self) -> None:
-        text = f"Attachments: {len(self.attachments)} " if self.model.attachment_types else ''
+        text = f"Attachments: {len(self.attachments)} " if self.model.attachment_types else ""
         
         if self.input_tokens != -1:
             text += f"Input Tokens: {self.input_tokens} Output Tokens: {self.output_tokens}"
@@ -335,7 +324,7 @@ class TuiApp(App):
         await self.get_response(prompt, attachments)
 
     async def get_response(self, prompt: str, attachments: list[llm.Attachment]) -> None:
-        response = Response(prompt, attachments, self.model.model_id, self.pandoc_path)
+        response = Response(prompt, attachments, self.model.model_id)
         await self.get_vertical_scroll().mount(response)
         model_options = self.get_supported_options(self.model, self.model_options)
         response.worker = self.stream_response(response, model_options)
@@ -383,7 +372,7 @@ class TuiApp(App):
             logger.error(e)
 
         finally:
-            response.query_one("#cancel").remove()
+            self.call_from_thread(response.query_one("#cancel").remove)
 
             if input_tokens and output_tokens:
                 if self.input_tokens == -1:
@@ -443,6 +432,7 @@ class TextEditor(ModalScreen):
 
     def action_submit(self) -> None:
         text = self.query_one(TextArea).text
+        self.app.query_one(PromptInput).value = ""
         self.dismiss(text)
 
     def action_back(self) -> None:
