@@ -12,4 +12,4 @@ build/
 *.spec
 *.exe
 out.html
-*.ps1
+llm_user/

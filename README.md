@@ -2,11 +2,9 @@
 
 A simple terminal UI for [llm](https://github.com/simonw/llm).  
 
-<img width="1920" height="900" alt="demo0" src="https://github.com/user-attachments/assets/cefba88a-3391-433d-b37c-81b291411ad9" />
-
 ## Setup
 
-### 1. Setup Virtual Environment (Optional)
+### 1. Create Virtual Environment (Optional)
 
 ```bash
 python -m venv ./.venv
@@ -35,20 +33,6 @@ LLM_DEEPSEEK_KEY=your_key_here
 XAI_API_KEY=your_key_here
 ```
 
-### 4. Install Extensions (Optional) 
-
-```bash
-llm install llm-anthropic
-```
-
-```bash
-llm install llm-deepseek
-```
-
-```bash
-llm install llm-grok
-```
-
 ## Usage
 
     python main.py
@@ -58,7 +42,7 @@ llm install llm-grok
 ### Example `.env` file:
 
 ```bash
-MODEL_OPTIONS={"temperature": 1.0, "max_tokens": 1000, "max_completion_tokens": 1000}
-DEFAULT_MODEL="gpt-4o"
-DEFAULT_SYSTEM_PROMPT="system prompt here"
+MODEL_OPTIONS={"temperature": 1.0, "max_tokens": 1000, "reasoning_effort": "high"}
+DEFAULT_MODEL="gpt-5-nano"
+DEFAULT_SYSTEM_PROMPT="You are an expert AI assistant."
 ```
