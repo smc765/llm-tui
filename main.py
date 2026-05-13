@@ -131,6 +131,7 @@ class Response(Markdown):
 
 
 class PromptInput(Input):
+    """fix input widget paste behavior"""
 
     @dataclass
     class FixPaste(Message):

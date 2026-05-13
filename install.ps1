@@ -13,23 +13,19 @@ try {
         throw "update python to version >= 3.12"
     }
 
-    if (-not(Test-Path -path ".\.venv")) {
-        python -m venv .\.venv
+    $venvPath = Join-Path $PSScriptRoot ".venv"
+
+    if (-not (Test-Path $venvPath)) {
+        python -m venv $venvPath
     }
 
-    # $activateScript = ".\.venv\Scripts\Activate.ps1"
+    $venvPython = Join-Path $venvPath "Scripts\python.exe"
 
-    # if (-not (Test-Path $activateScript)) {
-    #     throw "virtual environment activation script missing"
-    # }
-
-    # & $activateScript
-
-    if (-not (Test-Path ".\llm_user")) {
-        New-Item -ItemType Directory -Path ".\llm_user" | Out-Null
+    if (-not (Test-Path $venvPython)) {
+        throw "virtual environment python.exe missing"
     }
 
-    $llmUserPath = (Resolve-Path ".\llm_user").Path
+    $llmUserPath = Join-Path $PSScriptRoot "llm_user"
 
     [Environment]::SetEnvironmentVariable(
         "LLM_USER_PATH",
@@ -37,14 +33,14 @@ try {
         "User"
     )
 
-    if (-not (Test-Path "requirements.txt")) {
+    $requirementsPath = Join-Path $PSScriptRoot "requirements.txt"
+
+    if (-not (Test-Path $requirementsPath)) {
         throw "requirements.txt missing"
     }
 
-    $venvPython = Resolve-Path ".\.venv\Scripts\python.exe"
-
     & $venvPython -m pip install --upgrade pip
-    & $venvPython -m pip install --upgrade -r requirements.txt
+    & $venvPython -m pip install --upgrade -r $requirementsPath
 
     if ($LASTEXITCODE -ne 0) {
         throw "pip install failed"
@@ -57,11 +53,8 @@ try {
     $wshShell = New-Object -ComObject WScript.Shell
     $shortcut = $wshShell.CreateShortcut($shortcutPath)
 
-    # $shortcut.TargetPath = "powershell.exe"
-    # $scriptPath = Resolve-Path "run.ps1"
-    # $shortcut.Arguments = "-NoExit -NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
-    $shortcut.TargetPath = "$venvPython"
-    $shortcut.Arguments = "main.py"
+    $shortcut.TargetPath = "powershell.exe"
+    $shortcut.Arguments = "-NoExit -ExecutionPolicy Bypass -Command `"$venvPython main.py`""
     $shortcut.WorkingDirectory = "$PSScriptRoot"
 
     $shortcut.Save()
