@@ -184,9 +184,12 @@ class TuiApp(App):
             self.pandoc_path = shutil.which("pandoc")
 
     def compose(self) -> ComposeResult:
-        yield VerticalScroll()
-        yield Label()
-        yield PromptInput()
+        self.vertical_scroll = VerticalScroll()
+        self.label = Label()
+        self.input = PromptInput()
+        yield self.vertical_scroll
+        yield self.label
+        yield self.input
         yield Footer()
 
     def on_mount(self) -> None:
@@ -248,7 +251,7 @@ class TuiApp(App):
             self.attach_file(temp.name)
 
     def action_edit_prompt(self) -> None:
-        self.push_screen(TextEditor(self.query_one(Input).value, update_input=True), self.send_prompt)
+        self.push_screen(TextEditor(self.input.value, update_input=True), self.send_prompt)
 
     def action_clear_attachments(self) -> None:
         self.clear_attachments()
@@ -307,7 +310,7 @@ class TuiApp(App):
         if self.input_tokens != -1:
             text += f"Input Tokens: {self.input_tokens} Output Tokens: {self.output_tokens}"
 
-        self.query_one(Label).update(text)
+        self.label.update(text)
         self.refresh_bindings()
 
     async def send_prompt(self, prompt: str) -> None:
@@ -403,9 +406,8 @@ class TuiApp(App):
         return {k: v for k, v in options.items() if k in keys}
 
     def get_vertical_scroll(self) -> VerticalScroll:
-        vs = self.query_one(VerticalScroll)
-        vs.anchor()
-        return vs
+        self.vertical_scroll.anchor()
+        return self.vertical_scroll
 
 
 class TextEditor(ModalScreen):
@@ -425,23 +427,23 @@ class TextEditor(ModalScreen):
         self.update_input = update_input
 
     def compose(self) -> ComposeResult:
-        yield TextArea(self.text)
+        self.text_area = TextArea(self.text)
+        yield self.text_area
         yield Footer()
 
     def action_submit(self) -> None:
-        text = self.query_one(TextArea).text
-        self.app.query_one(PromptInput).value = ""
-        self.dismiss(text)
+        self.app.input.value = ""
+        self.dismiss(self.text_area.text)
 
     def action_back(self) -> None:
         if self.update_input:
-            text = re.sub(r"\r?\n", " ", self.query_one(TextArea).text)
-            self.app.query_one(PromptInput).value = text
+            text = re.sub(r"\r?\n", " ", self.text_area.text)
+            self.app.input.value = text
 
         self.app.pop_screen()
 
     def action_clear(self) -> None:
-        self.query_one(TextArea).clear()
+        self.text_area.clear()
 
     def action_load_file(self) -> None:
         filename = filedialog.askopenfilename()
@@ -456,9 +458,8 @@ class TextEditor(ModalScreen):
                 self.notify("Could not read file", title="Error")
                 return
                 
-        text_area = self.query_one(TextArea)
-        text_area.clear()
-        text_area.insert(text)
+        self.text_area.clear()
+        self.text_area.insert(text)
 
 
 class ModelMenu(ModalScreen):

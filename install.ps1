@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 try {
-    $pythonVersionStr = python --version 2>&1
+    $pythonVersionStr = python --version
 
     if ($pythonVersionStr -match 'Python (\d+\.\d+\.\d+)') {
         $pythonVersion = $matches[1]

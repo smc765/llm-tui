@@ -2,6 +2,7 @@ llm
 llm-anthropic
 llm-deepseek
 llm-grok
+llm-ollama
 pillow
 pyperclip
 python-dotenv
